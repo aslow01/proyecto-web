@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>LogiPanel - Dashboard Administrativo</title>
+  <link rel="stylesheet" href="css/styles.css" />
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css" />
+</head>
+<body>
+
+  <!-- SIDEBAR -->
+  <aside class="sidebar" id="sidebar">
+    <div class="sidebar-header">
+      <div class="logo">
+        <i class="fa-solid fa-truck-fast"></i>
+        <span class="logo-text">LogiPanel</span>
+      </div>
+      <button class="sidebar-toggle" id="sidebarToggle">
+        <i class="fa-solid fa-bars"></i>
+      </button>
+    </div>
+
+    <nav class="sidebar-nav">
+      <ul>
+        <li>
+          <a href="#" class="nav-item active" data-page="inicio">
+            <i class="fa-solid fa-house"></i>
+            <span>Inicio</span>
+          </a>
+        </li>
+        <li class="nav-group">
+          <a href="#" class="nav-item has-submenu" data-page="movilidades">
+            <i class="fa-solid fa-car"></i>
+            <span>Movilidades</span>
+            <i class="fa-solid fa-chevron-down arrow"></i>
+          </a>
+          <ul class="submenu">
+            <li><a href="#" class="nav-subitem" data-page="movilidades" data-filter="todas"><i class="fa-solid fa-list"></i> Todas</a></li>
+            <li><a href="#" class="nav-subitem" data-page="movilidades" data-filter="mendoza"><i class="fa-solid fa-map-pin"></i> Mendoza</a></li>
+            <li><a href="#" class="nav-subitem" data-page="movilidades" data-filter="san-juan"><i class="fa-solid fa-map-pin"></i> San Juan</a></li>
+            <li><a href="#" class="nav-subitem" data-page="movilidades" data-filter="santa-cruz"><i class="fa-solid fa-map-pin"></i> Santa Cruz</a></li>
+            <li><a href="#" class="nav-subitem" data-page="movilidades" data-filter="disponibles"><i class="fa-solid fa-circle-check"></i> Disponibles</a></li>
+            <li><a href="#" class="nav-subitem" data-page="movilidades" data-filter="en-servicio"><i class="fa-solid fa-circle-play"></i> En servicio</a></li>
+            <li><a href="#" class="nav-subitem" data-page="movilidades" data-filter="mantenimiento"><i class="fa-solid fa-wrench"></i> En mantenimiento</a></li>
+          </ul>
+        </li>
+        <li class="nav-group">
+          <a href="#" class="nav-item has-submenu" data-page="objetivos">
+            <i class="fa-solid fa-bullseye"></i>
+            <span>Objetivos</span>
+            <i class="fa-solid fa-chevron-down arrow"></i>
+          </a>
+          <ul class="submenu">
+            <li><a href="#" class="nav-subitem" data-page="objetivos" data-filter="todos"><i class="fa-solid fa-list"></i> Todos</a></li>
+            <li><a href="#" class="nav-subitem" data-page="objetivos" data-filter="barrick"><i class="fa-solid fa-mountain"></i> Barrick</a></li>
+            <li><a href="#" class="nav-subitem" data-page="objetivos" data-filter="minera"><i class="fa-solid fa-industry"></i> Minera</a></li>
+            <li><a href="#" class="nav-subitem" data-page="objetivos" data-filter="urbano"><i class="fa-solid fa-city"></i> Urbano</a></li>
+            <li><a href="#" class="nav-subitem" data-page="objetivos" data-filter="gema"><i class="fa-solid fa-gem"></i> Gema / Gemera</a></li>
+          </ul>
+        </li>
+        <li>
+          <a href="#" class="nav-item" data-page="partes">
+            <i class="fa-solid fa-clipboard-list"></i>
+            <span>Partes Diarios</span>
+          </a>
+        </li>
+        <li>
+          <a href="#" class="nav-item" data-page="novedades">
+            <i class="fa-solid fa-bell"></i>
+            <span>Novedades</span>
+            <span class="badge" id="badgeNovedades">3</span>
+          </a>
+        </li>
+        <li class="nav-group">
+          <a href="#" class="nav-item has-submenu" data-page="reportes">
+            <i class="fa-solid fa-chart-bar"></i>
+            <span>Reportes</span>
+            <i class="fa-solid fa-chevron-down arrow"></i>
+          </a>
+          <ul class="submenu">
+            <li><a href="#" class="nav-subitem" data-page="reportes" data-filter="partes-fecha"><i class="fa-solid fa-calendar"></i> Partes por fecha</a></li>
+            <li><a href="#" class="nav-subitem" data-page="reportes" data-filter="novedades-unidad"><i class="fa-solid fa-truck"></i> Novedades por unidad</a></li>
+            <li><a href="#" class="nav-subitem" data-page="reportes" data-filter="historial-objetivo"><i class="fa-solid fa-clock-rotate-left"></i> Historial por objetivo</a></li>
+            <li><a href="#" class="nav-subitem" data-page="reportes" data-filter="exportar"><i class="fa-solid fa-file-export"></i> Exportar</a></li>
+          </ul>
+        </li>
+        <li>
+          <a href="#" class="nav-item" data-page="configuracion">
+            <i class="fa-solid fa-gear"></i>
+            <span>Configuración</span>
+          </a>
+        </li>
+        <li>
+          <a href="#" class="nav-item" data-page="usuarios">
+            <i class="fa-solid fa-users"></i>
+            <span>Usuarios</span>
+          </a>
+        </li>
+      </ul>
+    </nav>
+
+    <div class="sidebar-footer">
+      <div class="user-profile">
+        <div class="avatar">JD</div>
+        <div class="user-info">
+          <span class="user-name">Juan Díaz</span>
+          <span class="user-role">Administrador</span>
+        </div>
+      </div>
+    </div>
+  </aside>
+
+  <!-- MAIN CONTENT -->
+  <div class="main-wrapper" id="mainWrapper">
+
+    <!-- TOPBAR -->
+    <header class="topbar">
+      <div class="topbar-left">
+        <button class="topbar-toggle" id="topbarToggle">
+          <i class="fa-solid fa-bars"></i>
+        </button>
+        <div class="search-bar">
+          <i class="fa-solid fa-magnifying-glass"></i>
+          <input type="text" id="globalSearch" placeholder="Buscar movilidad, objetivo, patente..." autocomplete="off" />
+          <div class="search-dropdown" id="searchDropdown"></div>
+        </div>
+      </div>
+      <div class="topbar-right">
+        <div class="topbar-date">
+          <i class="fa-solid fa-calendar-day"></i>
+          <span id="currentDate"></span>
+        </div>
+        <button class="topbar-btn" id="alertBtn">
+          <i class="fa-solid fa-bell"></i>
+          <span class="badge">3</span>
+        </button>
+        <div class="topbar-user">
+          <div class="avatar sm">JD</div>
+          <span>Juan Díaz</span>
+          <i class="fa-solid fa-chevron-down"></i>
+        </div>
+      </div>
+    </header>
+
+    <!-- PAGE CONTENT -->
+    <main class="page-content" id="pageContent">
+      <!-- Pages are injected here by JS -->
+    </main>
+
+  </div>
+
+  <!-- MODAL -->
+  <div class="modal-overlay" id="modalOverlay">
+    <div class="modal" id="modal">
+      <div class="modal-header">
+        <h3 id="modalTitle">Modal</h3>
+        <button class="modal-close" id="modalClose"><i class="fa-solid fa-xmark"></i></button>
+      </div>
+      <div class="modal-body" id="modalBody"></div>
+      <div class="modal-footer" id="modalFooter"></div>
+    </div>
+  </div>
+
+  <script src="js/data.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>
