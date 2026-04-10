@@ -3,18 +3,62 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>LogiPanel - Dashboard Administrativo</title>
+  <title>HUARPE LOGISTICA</title>
+  <link rel="icon" type="image/png" href="imagenes/LOGO HUARPE.png" />
   <link rel="stylesheet" href="css/styles.css" />
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css" />
 </head>
-<body>
+<body class="auth-locked">
+
+  <div class="auth-overlay show" id="authOverlay">
+    <div class="auth-shell">
+      <section class="auth-card">
+        <div class="auth-brand">
+          <img src="imagenes/LOGO HUARPE.png" alt="Logo Huarpe" class="auth-logo" />
+          <div>
+            <span class="auth-kicker auth-kicker-card">HUARPE LOGISTICA</span>
+            <h2>Iniciar sesión</h2>
+            <p>Ingresá con tu correo y contraseña habilitados.</p>
+          </div>
+        </div>
+
+        <form id="loginForm" class="auth-form">
+          <div class="form-group full">
+            <label for="loginEmail">Correo</label>
+            <input type="email" id="loginEmail" autocomplete="username" placeholder="nombre@empresa.com" required />
+          </div>
+          <div class="form-group full">
+            <label for="loginPassword">Contraseña</label>
+            <div class="password-field">
+              <input type="password" id="loginPassword" autocomplete="current-password" placeholder="Ingresar contraseña" required />
+              <button type="button" class="password-toggle" id="passwordToggle" aria-label="Mostrar contraseña" aria-pressed="false">
+                <i class="fa-regular fa-eye"></i>
+              </button>
+            </div>
+          </div>
+          <div class="auth-meta">
+            <label class="remember-session">
+              <input type="checkbox" id="rememberSession" checked />
+              <span class="remember-box"><i class="fa-solid fa-check"></i></span>
+              <span>Recordar sesión en este equipo</span>
+            </label>
+            <span class="auth-meta-note">Acceso interno</span>
+          </div>
+          <div class="auth-actions">
+            <button type="submit" class="btn btn-primary auth-submit"><i class="fa-solid fa-right-to-bracket"></i> Iniciar sesión</button>
+          </div>
+          <p class="auth-message" id="loginMessage">Ingresá con un usuario habilitado en el sistema.</p>
+        </form>
+      </section>
+    </div>
+  </div>
 
   <!-- SIDEBAR -->
   <aside class="sidebar" id="sidebar">
     <div class="sidebar-header">
       <div class="logo">
-        <i class="fa-solid fa-truck-fast"></i>
-        <span class="logo-text">LogiPanel</span>
+        <img src="imagenes/LOGO HUARPE.png" alt="Logo Huarpe" class="logo-image" />
+        <span class="logo-text">HUARPE LOGISTICA</span>
       </div>
       <button class="sidebar-toggle" id="sidebarToggle">
         <i class="fa-solid fa-bars"></i>
@@ -40,10 +84,28 @@
             <li><a href="#" class="nav-subitem" data-page="movilidades" data-filter="mendoza"><i class="fa-solid fa-map-pin"></i> Mendoza</a></li>
             <li><a href="#" class="nav-subitem" data-page="movilidades" data-filter="san-juan"><i class="fa-solid fa-map-pin"></i> San Juan</a></li>
             <li><a href="#" class="nav-subitem" data-page="movilidades" data-filter="santa-cruz"><i class="fa-solid fa-map-pin"></i> Santa Cruz</a></li>
+            <li><a href="#" class="nav-subitem" data-page="movilidades" data-filter="jujuy"><i class="fa-solid fa-map-pin"></i> Jujuy</a></li>
+            <li><a href="#" class="nav-subitem" data-page="movilidades" data-filter="salta"><i class="fa-solid fa-map-pin"></i> Salta</a></li>
+            <li><a href="#" class="nav-subitem" data-page="movilidades" data-filter="cordoba"><i class="fa-solid fa-map-pin"></i> Córdoba</a></li>
+            <li><a href="#" class="nav-subitem" data-page="movilidades" data-filter="san-luis"><i class="fa-solid fa-map-pin"></i> San Luis</a></li>
+            <li><a href="#" class="nav-subitem" data-page="movilidades" data-filter="la-rioja"><i class="fa-solid fa-map-pin"></i> La Rioja</a></li>
+            <li><a href="#" class="nav-subitem" data-page="movilidades" data-filter="catamarca"><i class="fa-solid fa-map-pin"></i> Catamarca</a></li>
             <li><a href="#" class="nav-subitem" data-page="movilidades" data-filter="disponibles"><i class="fa-solid fa-circle-check"></i> Disponibles</a></li>
             <li><a href="#" class="nav-subitem" data-page="movilidades" data-filter="en-servicio"><i class="fa-solid fa-circle-play"></i> En servicio</a></li>
             <li><a href="#" class="nav-subitem" data-page="movilidades" data-filter="mantenimiento"><i class="fa-solid fa-wrench"></i> En mantenimiento</a></li>
           </ul>
+        </li>
+        <li>
+          <a href="#" class="nav-item" data-page="requerimientos">
+            <i class="fa-solid fa-clipboard-check"></i>
+            <span>Requerimientos</span>
+          </a>
+        </li>
+        <li>
+          <a href="#" class="nav-item" data-page="combustibles">
+            <i class="fa-solid fa-gas-pump"></i>
+            <span>Combustibles</span>
+          </a>
         </li>
         <li class="nav-group">
           <a href="#" class="nav-item has-submenu" data-page="objetivos">
@@ -51,12 +113,8 @@
             <span>Objetivos</span>
             <i class="fa-solid fa-chevron-down arrow"></i>
           </a>
-          <ul class="submenu">
+          <ul class="submenu" id="objetivosSubmenu">
             <li><a href="#" class="nav-subitem" data-page="objetivos" data-filter="todos"><i class="fa-solid fa-list"></i> Todos</a></li>
-            <li><a href="#" class="nav-subitem" data-page="objetivos" data-filter="barrick"><i class="fa-solid fa-mountain"></i> Barrick</a></li>
-            <li><a href="#" class="nav-subitem" data-page="objetivos" data-filter="minera"><i class="fa-solid fa-industry"></i> Minera</a></li>
-            <li><a href="#" class="nav-subitem" data-page="objetivos" data-filter="urbano"><i class="fa-solid fa-city"></i> Urbano</a></li>
-            <li><a href="#" class="nav-subitem" data-page="objetivos" data-filter="gema"><i class="fa-solid fa-gem"></i> Gema / Gemera</a></li>
           </ul>
         </li>
         <li>
@@ -69,7 +127,7 @@
           <a href="#" class="nav-item" data-page="novedades">
             <i class="fa-solid fa-bell"></i>
             <span>Novedades</span>
-            <span class="badge" id="badgeNovedades">3</span>
+            <span class="badge" id="badgeNovedades" style="display:none"></span>
           </a>
         </li>
         <li class="nav-group">
@@ -102,10 +160,10 @@
 
     <div class="sidebar-footer">
       <div class="user-profile">
-        <div class="avatar">JD</div>
+        <div class="avatar" id="sidebarAvatar">--</div>
         <div class="user-info">
-          <span class="user-name">Juan Díaz</span>
-          <span class="user-role">Administrador</span>
+          <span class="user-name" id="sidebarUserName">Sin usuario</span>
+          <span class="user-role" id="sidebarUserRole">Perfil no configurado</span>
         </div>
       </div>
     </div>
@@ -133,11 +191,11 @@
         </div>
         <button class="topbar-btn" id="alertBtn">
           <i class="fa-solid fa-bell"></i>
-          <span class="badge">3</span>
+          <span class="badge" style="display:none"></span>
         </button>
-        <div class="topbar-user">
-          <div class="avatar sm">JD</div>
-          <span>Juan Díaz</span>
+        <div class="topbar-user" id="topbarUser">
+          <div class="avatar sm" id="topbarAvatar">--</div>
+          <span id="topbarUserName">Sin usuario</span>
           <i class="fa-solid fa-chevron-down"></i>
         </div>
       </div>
