@@ -1,5 +1,6 @@
 const fs = require('fs');
 const path = require('path');
+const crypto = require('crypto');
 const express = require('express');
 const session = require('express-session');
 const Database = require('better-sqlite3');
@@ -8,9 +9,21 @@ require('dotenv').config();
 
 const app = express();
 const PORT = Number(process.env.PORT || 3000);
-const SESSION_SECRET = process.env.SESSION_SECRET || 'huarpe-logistica-dev-secret';
+const SESSION_SECRET = process.env.SESSION_SECRET || crypto.randomBytes(32).toString('hex');
+const SESSION_COOKIE_NAME = 'huarpe.sid';
 const DATA_DIR = path.join(__dirname, 'data');
 const DB_PATH = path.join(DATA_DIR, 'huarpe-logistica.db');
+const LOGIN_RATE_LIMIT_WINDOW_MS = 15 * 60 * 1000;
+const LOGIN_RATE_LIMIT_MAX_ATTEMPTS = 5;
+const JSON_BODY_LIMIT = '12mb';
+const MAX_PDF_BYTES = 8 * 1024 * 1024;
+const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
+const VALID_PROVINCES = ['mendoza', 'san-juan', 'santa-cruz'];
+const VALID_VEHICLE_STATES = ['disponible', 'servicio', 'mantenimiento', 'fuera'];
+const VALID_OWNERSHIP_TYPES = ['propia', 'alquilada'];
+const VALID_PARTE_STATES = ['completo', 'observado'];
+const VALID_NOVEDAD_TYPES = ['rotura', 'mantenimiento', 'retraso', 'incidente', 'observacion'];
+const VALID_NOVEDAD_STATUS = ['urgente', 'pendiente', 'resuelto'];
 const DOCUMENT_ALERTS = [
   { key: 'rto', field: 'rto_vencimiento', label: 'RTO' },
   { key: 'seguro', field: 'seguro_vencimiento', label: 'Seguro' },
@@ -22,6 +35,7 @@ const db = new Database(DB_PATH);
 db.pragma('journal_mode = WAL');
 const PRESENCE_TIMEOUT_MS = 30000;
 const presenceState = new Map();
+const loginRateLimitState = new Map();
 const runtimeSyncState = {
   changeVersion: 1,
   lastChangedAt: '',
@@ -29,6 +43,13 @@ const runtimeSyncState = {
   lastChangedByUserId: null,
   lastChangedByName: '',
 };
+
+app.set('trust proxy', 1);
+app.disable('x-powered-by');
+
+if (!process.env.SESSION_SECRET) {
+  console.warn('SESSION_SECRET no está definido. Se usará una clave efímera para esta ejecución.');
+}
 
 db.exec(`
   CREATE TABLE IF NOT EXISTS users (
@@ -139,17 +160,70 @@ ensureColumn('novedades', 'generado_automaticamente', 'INTEGER NOT NULL DEFAULT 
 
 seedAdminUser();
 
-app.use(express.json());
+app.use(express.json({ limit: JSON_BODY_LIMIT }));
+app.use((req, _res, next) => {
+  if (req.path.startsWith('/api/')) {
+    req.body = req.body && typeof req.body === 'object' ? req.body : {};
+  }
+  next();
+});
+app.use((_req, res, next) => {
+  res.setHeader('Cache-Control', 'no-store');
+  res.setHeader('Pragma', 'no-cache');
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('X-Frame-Options', 'DENY');
+  res.setHeader('Referrer-Policy', 'same-origin');
+  res.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=()');
+  res.setHeader('Cross-Origin-Opener-Policy', 'same-origin');
+  res.setHeader(
+    'Content-Security-Policy',
+    "default-src 'self'; img-src 'self' data: https:; style-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com; font-src 'self' https://cdnjs.cloudflare.com data:; script-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'none'; form-action 'self'"
+  );
+  next();
+});
 app.use(session({
+  name: SESSION_COOKIE_NAME,
   secret: SESSION_SECRET,
   resave: false,
   saveUninitialized: false,
   cookie: {
     httpOnly: true,
-    sameSite: 'lax',
-    secure: false,
+    sameSite: 'strict',
+    secure: 'auto',
   },
 }));
+app.use((req, res, next) => {
+  if (!req.path.startsWith('/api/')) {
+    next();
+    return;
+  }
+
+  if (['GET', 'HEAD', 'OPTIONS'].includes(req.method)) {
+    next();
+    return;
+  }
+
+  if (req.path === '/api/auth/login' || !req.session?.userId) {
+    next();
+    return;
+  }
+
+  if (!isTrustedApiRequest(req)) {
+    res.status(403).json({ error: 'Origen de la petición no permitido.' });
+    return;
+  }
+
+  const expectedToken = ensureCsrfToken(req.session);
+  const providedToken = String(req.get('x-csrf-token') || '').trim();
+  const expectedBuffer = Buffer.from(expectedToken);
+  const providedBuffer = Buffer.from(providedToken);
+  if (!providedToken || expectedBuffer.length !== providedBuffer.length || !crypto.timingSafeEqual(providedBuffer, expectedBuffer)) {
+    res.status(403).json({ error: 'Token CSRF inválido o ausente.' });
+    return;
+  }
+
+  next();
+});
 
 app.get('/api/health', (_req, res) => {
   res.json({ ok: true });
@@ -161,7 +235,7 @@ app.get('/api/auth/session', (req, res) => {
     res.status(401).json({ error: 'No hay una sesión activa.' });
     return;
   }
-  res.json({ user });
+  res.json({ user, csrfToken: ensureCsrfToken(req.session) });
 });
 
 app.post('/api/auth/login', (req, res) => {
@@ -173,35 +247,50 @@ app.post('/api/auth/login', (req, res) => {
     return;
   }
 
+  if (isLoginRateLimited(req, email)) {
+    res.status(429).json({ error: 'Demasiados intentos de inicio de sesión. Esperá unos minutos e intentá nuevamente.' });
+    return;
+  }
+
   const row = db.prepare('SELECT * FROM users WHERE lower(email) = ? LIMIT 1').get(email);
   if (!row || row.estado !== 'activo') {
-    res.status(401).json({ error: 'No existe un usuario activo con ese correo.' });
+    registerLoginFailure(req, email);
+    res.status(401).json({ error: 'Credenciales inválidas.' });
     return;
   }
 
   const valid = bcrypt.compareSync(password, row.password_hash);
   if (!valid) {
-    res.status(401).json({ error: 'La contraseña es incorrecta.' });
+    registerLoginFailure(req, email);
+    res.status(401).json({ error: 'Credenciales inválidas.' });
     return;
   }
 
   const today = new Date().toISOString().slice(0, 10);
   db.prepare('UPDATE users SET ultima = ? WHERE id = ?').run(today, row.id);
-  req.session.userId = row.id;
-  if (rememberSession) {
-    req.session.cookie.maxAge = 1000 * 60 * 60 * 24 * 30;
-  } else {
-    req.session.cookie.expires = false;
-    req.session.cookie.maxAge = null;
-  }
+  req.session.regenerate(error => {
+    if (error) {
+      res.status(500).json({ error: 'No se pudo iniciar la sesión.' });
+      return;
+    }
 
-  res.json({ user: serializeUser({ ...row, ultima: today }) });
+    clearLoginFailures(req, email);
+    req.session.userId = row.id;
+    if (rememberSession) {
+      req.session.cookie.maxAge = 1000 * 60 * 60 * 24 * 30;
+    } else {
+      req.session.cookie.expires = false;
+      req.session.cookie.maxAge = null;
+    }
+
+    res.json({ user: serializeUser({ ...row, ultima: today }), csrfToken: ensureCsrfToken(req.session) });
+  });
 });
 
 app.post('/api/auth/logout', (req, res) => {
   removePresence(req.session.userId);
   req.session.destroy(() => {
-    res.clearCookie('connect.sid');
+    res.clearCookie(SESSION_COOKIE_NAME, getSessionCookieOptions(req));
     res.json({ ok: true });
   });
 });
@@ -400,6 +489,11 @@ app.post('/api/objetivos', requireRoles(['administrador', 'logistica']), (req, r
     res.status(400).json({ error: 'Ingresá un nombre para el objetivo.' });
     return;
   }
+  const objectiveValidationError = validateObjectiveFields({ nombre, descripcion });
+  if (objectiveValidationError) {
+    res.status(400).json({ error: objectiveValidationError });
+    return;
+  }
 
   const exists = db.prepare('SELECT id FROM objetivos WHERE lower(nombre) = lower(?) LIMIT 1').get(nombre);
   if (exists) {
@@ -418,13 +512,23 @@ app.post('/api/movilidades', requireRoles(['administrador', 'logistica', 'superv
   const patente = String(req.body.patente || '').trim().toUpperCase();
   const marca = String(req.body.marca || '').trim().toUpperCase();
   const descripcion = String(req.body.descripcion || '').trim();
+  const vehicleAttachments = collectValidatedVehicleAttachments(req.body);
   if (!patente || !marca || !descripcion) {
     res.status(400).json({ error: 'Completá los campos obligatorios de la unidad.' });
+    return;
+  }
+  if (vehicleAttachments.error) {
+    res.status(400).json({ error: vehicleAttachments.error });
     return;
   }
   const vehicleValidationError = validateVehicleTechnicalFields(req.body);
   if (vehicleValidationError) {
     res.status(400).json({ error: vehicleValidationError });
+    return;
+  }
+  const vehiclePayloadValidationError = validateVehiclePayload(req.body, { patente, marca, descripcion });
+  if (vehiclePayloadValidationError) {
+    res.status(400).json({ error: vehiclePayloadValidationError });
     return;
   }
   const vehicleServiceValidationError = validateVehicleServiceFields(req.body);
@@ -461,10 +565,10 @@ app.post('/api/movilidades', requireRoles(['administrador', 'logistica', 'superv
     String(req.body.chofer || ''),
     String(req.body.rtoVencimiento || ''),
     String(req.body.seguroVencimiento || ''),
-    stringifyJson(req.body.tarjetaVerdeAdjunto),
-    stringifyJson(req.body.tituloAdjunto),
-    stringifyJson(req.body.contratoFirmadoAdjunto),
-    stringifyJson(req.body.rtoAdjunto)
+    stringifyJson(vehicleAttachments.tarjetaVerdeAdjunto),
+    stringifyJson(vehicleAttachments.tituloAdjunto),
+    stringifyJson(vehicleAttachments.contratoFirmadoAdjunto),
+    stringifyJson(vehicleAttachments.rtoAdjunto)
   );
 
   markDataChanged(req.currentUser, 'movilidades');
@@ -488,9 +592,25 @@ app.put('/api/movilidades/:id', requireRoles(['administrador', 'logistica', 'sup
     res.status(409).json({ error: buildMobilityLockMessage(existing.patente, activeEditors) });
     return;
   }
+  const vehicleAttachments = collectValidatedVehicleAttachments(req.body);
+  if (vehicleAttachments.error) {
+    res.status(400).json({ error: vehicleAttachments.error });
+    return;
+  }
   const vehicleValidationError = validateVehicleTechnicalFields(req.body);
   if (vehicleValidationError) {
     res.status(400).json({ error: vehicleValidationError });
+    return;
+  }
+  const nextUnitType = normalizeVehicleUnitType(req.body.tipoUnidad || existing.tipo_unidad);
+  const nextPatente = String(req.body.patente || existing.patente).trim().toUpperCase();
+  const vehiclePayloadValidationError = validateVehiclePayload(req.body, {
+    patente: nextPatente,
+    marca: String(req.body.marca || ''),
+    descripcion: String(req.body.descripcion || ''),
+  });
+  if (vehiclePayloadValidationError) {
+    res.status(400).json({ error: vehiclePayloadValidationError });
     return;
   }
   const vehicleServiceValidationError = validateVehicleServiceFields(req.body);
@@ -498,9 +618,6 @@ app.put('/api/movilidades/:id', requireRoles(['administrador', 'logistica', 'sup
     res.status(400).json({ error: vehicleServiceValidationError });
     return;
   }
-
-  const nextUnitType = normalizeVehicleUnitType(req.body.tipoUnidad || existing.tipo_unidad);
-  const nextPatente = String(req.body.patente || existing.patente).trim().toUpperCase();
   if (nextUnitType === 'cuatriciclo') {
     if (!nextPatente) {
       res.status(400).json({ error: 'Ingresá la patente o identificador del cuatriciclo.' });
@@ -536,10 +653,10 @@ app.put('/api/movilidades/:id', requireRoles(['administrador', 'logistica', 'sup
     String(req.body.ultimaNovedad || 'Sin novedades'),
     String(req.body.rtoVencimiento || ''),
     String(req.body.seguroVencimiento || ''),
-    stringifyJson(req.body.tarjetaVerdeAdjunto),
-    stringifyJson(req.body.tituloAdjunto),
-    stringifyJson(req.body.contratoFirmadoAdjunto),
-    stringifyJson(req.body.rtoAdjunto),
+    stringifyJson(vehicleAttachments.tarjetaVerdeAdjunto),
+    stringifyJson(vehicleAttachments.tituloAdjunto),
+    stringifyJson(vehicleAttachments.contratoFirmadoAdjunto),
+    stringifyJson(vehicleAttachments.rtoAdjunto),
     id
   );
 
@@ -612,8 +729,18 @@ app.post('/api/partes', requireRoles(['administrador', 'logistica', 'supervisor'
   const chofer = String(req.body.chofer || '').trim();
   const kmInicial = Number(req.body.kmInicial || 0);
   const kmFinal = Number(req.body.kmFinal || 0);
+  const parteAttachment = collectValidatedParteAttachment(req.body.adjunto);
   if (!fecha || !chofer) {
     res.status(400).json({ error: 'Completá los campos obligatorios del parte.' });
+    return;
+  }
+  if (parteAttachment.error) {
+    res.status(400).json({ error: parteAttachment.error });
+    return;
+  }
+  const parteValidationError = validatePartePayload(req.body, { fecha, chofer, kmInicial, kmFinal });
+  if (parteValidationError) {
+    res.status(400).json({ error: parteValidationError });
     return;
   }
   if (kmFinal < kmInicial) {
@@ -638,7 +765,7 @@ app.post('/api/partes', requireRoles(['administrador', 'logistica', 'supervisor'
     stringifyJson(req.body.cabecera),
     stringifyJson(req.body.documentacion),
     stringifyJson(req.body.checklist),
-    stringifyJson(req.body.adjunto),
+    stringifyJson(parteAttachment.adjunto),
     String(req.body.estado || 'completo')
   );
 
@@ -668,6 +795,16 @@ app.put('/api/partes/:id', requireRoles(['administrador', 'logistica', 'supervis
     res.status(400).json({ error: 'Completá los campos obligatorios del parte.' });
     return;
   }
+  const parteAttachment = collectValidatedParteAttachment(req.body.adjunto);
+  if (parteAttachment.error) {
+    res.status(400).json({ error: parteAttachment.error });
+    return;
+  }
+  const parteValidationError = validatePartePayload(req.body, { fecha, chofer, kmInicial, kmFinal });
+  if (parteValidationError) {
+    res.status(400).json({ error: parteValidationError });
+    return;
+  }
 
   if (kmFinal < kmInicial) {
     res.status(400).json({ error: 'Km final no puede ser menor al inicial.' });
@@ -692,7 +829,7 @@ app.put('/api/partes/:id', requireRoles(['administrador', 'logistica', 'supervis
     stringifyJson(req.body.cabecera),
     stringifyJson(req.body.documentacion),
     stringifyJson(req.body.checklist),
-    stringifyJson(req.body.adjunto),
+    stringifyJson(parteAttachment.adjunto),
     String(req.body.estado || 'completo'),
     id
   );
@@ -705,6 +842,11 @@ app.post('/api/novedades', requireRoles(['administrador', 'logistica', 'supervis
   const titulo = String(req.body.titulo || '').trim();
   if (!titulo) {
     res.status(400).json({ error: 'Ingresá un título para la novedad.' });
+    return;
+  }
+  const novedadValidationError = validateNovedadPayload(req.body, { titulo });
+  if (novedadValidationError) {
+    res.status(400).json({ error: novedadValidationError });
     return;
   }
 
@@ -744,6 +886,11 @@ app.put('/api/novedades/:id', requireRoles(['administrador', 'logistica', 'super
 
   if (!titulo) {
     res.status(400).json({ error: 'Ingresá un título para la novedad.' });
+    return;
+  }
+  const novedadValidationError = validateNovedadPayload(req.body, { titulo });
+  if (novedadValidationError) {
+    res.status(400).json({ error: novedadValidationError });
     return;
   }
 
@@ -798,14 +945,84 @@ app.listen(PORT, () => {
 function seedAdminUser() {
   const adminName = process.env.ADMIN_NAME || 'Matias Ormeno';
   const adminEmail = String(process.env.ADMIN_EMAIL || 'matias.ariel.ormeno2@gmail.com').trim().toLowerCase();
-  const adminPassword = String(process.env.ADMIN_PASSWORD || 'Aaslow1597320022@@');
   const exists = db.prepare('SELECT id FROM users WHERE lower(email) = ? LIMIT 1').get(adminEmail);
   if (exists) return;
+
+  const configuredPassword = String(process.env.ADMIN_PASSWORD || '').trim();
+  const adminPassword = configuredPassword || crypto.randomBytes(18).toString('base64url');
+  if (!configuredPassword) {
+    console.warn(`ADMIN_PASSWORD no está definido. Se creó una contraseña temporal para ${adminEmail}: ${adminPassword}`);
+  }
 
   const passwordHash = bcrypt.hashSync(adminPassword, 10);
   db.prepare(
     'INSERT INTO users (nombre, email, password_hash, rol, estado, ultima) VALUES (?, ?, ?, ?, ?, ?)'
   ).run(adminName, adminEmail, passwordHash, 'administrador', 'activo', '');
+}
+
+function getSessionCookieOptions(req) {
+  return {
+    httpOnly: true,
+    sameSite: 'strict',
+    secure: isSecureRequest(req),
+    path: '/',
+  };
+}
+
+function isSecureRequest(req) {
+  return req.secure || String(req.get('x-forwarded-proto') || '').split(',')[0].trim() === 'https';
+}
+
+function getClientIp(req) {
+  return String(req.ip || req.socket?.remoteAddress || 'unknown').trim().toLowerCase();
+}
+
+function getLoginRateLimitKeys(req, email) {
+  const normalizedEmail = String(email || '').trim().toLowerCase();
+  const clientIp = getClientIp(req);
+  return [
+    `ip:${clientIp}`,
+    `email:${normalizedEmail}`,
+    `combo:${clientIp}:${normalizedEmail}`,
+  ];
+}
+
+function pruneLoginRateLimits() {
+  const now = Date.now();
+  for (const [key, entry] of loginRateLimitState.entries()) {
+    if (!entry || entry.resetAt <= now) {
+      loginRateLimitState.delete(key);
+    }
+  }
+}
+
+function isLoginRateLimited(req, email) {
+  pruneLoginRateLimits();
+  return getLoginRateLimitKeys(req, email).some(key => {
+    const entry = loginRateLimitState.get(key);
+    return Boolean(entry && entry.count >= LOGIN_RATE_LIMIT_MAX_ATTEMPTS && entry.resetAt > Date.now());
+  });
+}
+
+function registerLoginFailure(req, email) {
+  pruneLoginRateLimits();
+  const now = Date.now();
+  for (const key of getLoginRateLimitKeys(req, email)) {
+    const current = loginRateLimitState.get(key);
+    if (!current || current.resetAt <= now) {
+      loginRateLimitState.set(key, { count: 1, resetAt: now + LOGIN_RATE_LIMIT_WINDOW_MS });
+      continue;
+    }
+
+    current.count += 1;
+    loginRateLimitState.set(key, current);
+  }
+}
+
+function clearLoginFailures(req, email) {
+  const keys = getLoginRateLimitKeys(req, email);
+  loginRateLimitState.delete(keys[1]);
+  loginRateLimitState.delete(keys[2]);
 }
 
 function getSessionUser(userId) {
@@ -1068,6 +1285,95 @@ function stringifyJson(value) {
   }
 }
 
+function ensureCsrfToken(sessionState) {
+  if (!sessionState.csrfToken) {
+    sessionState.csrfToken = crypto.randomBytes(24).toString('hex');
+  }
+  return sessionState.csrfToken;
+}
+
+function normalizeStoredAttachment(value) {
+  const input = value && typeof value === 'object' ? value : {};
+  return {
+    name: String(input.name || '').trim().slice(0, 180),
+    type: String(input.type || '').trim().slice(0, 120),
+    dataUrl: String(input.dataUrl || '').trim(),
+  };
+}
+
+function estimateDataUrlBytes(dataUrl) {
+  const commaIndex = dataUrl.indexOf(',');
+  if (commaIndex === -1) return 0;
+  const payload = dataUrl.slice(commaIndex + 1).replace(/\s/g, '');
+  const padding = payload.endsWith('==') ? 2 : payload.endsWith('=') ? 1 : 0;
+  return Math.max(0, Math.floor((payload.length * 3) / 4) - padding);
+}
+
+function validateStoredAttachment(value, options = {}) {
+  const normalized = normalizeStoredAttachment(value);
+  const hasAnyField = Boolean(normalized.name || normalized.type || normalized.dataUrl);
+  if (!hasAnyField) {
+    return { attachment: { name: '', type: '', dataUrl: '' }, error: '' };
+  }
+
+  const {
+    label = 'El adjunto',
+    allowedMimePrefixes = [],
+    maxBytes = 0,
+  } = options;
+
+  if (!normalized.name || !normalized.type || !normalized.dataUrl) {
+    return { attachment: normalized, error: `${label} está incompleto.` };
+  }
+
+  if (!normalized.dataUrl.startsWith(`data:${normalized.type};base64,`)) {
+    return { attachment: normalized, error: `${label} no tiene un formato válido.` };
+  }
+
+  if (!allowedMimePrefixes.some(prefix => normalized.type === prefix || normalized.type.startsWith(`${prefix}/`))) {
+    return { attachment: normalized, error: `${label} tiene un tipo de archivo no permitido.` };
+  }
+
+  const sizeBytes = estimateDataUrlBytes(normalized.dataUrl);
+  if (!sizeBytes || (maxBytes && sizeBytes > maxBytes)) {
+    return { attachment: normalized, error: `${label} supera el tamaño permitido.` };
+  }
+
+  return { attachment: normalized, error: '' };
+}
+
+function collectValidatedVehicleAttachments(payload = {}) {
+  const definitions = [
+    ['tarjetaVerdeAdjunto', 'La tarjeta verde', ['application/pdf'], MAX_PDF_BYTES],
+    ['tituloAdjunto', 'El título', ['application/pdf'], MAX_PDF_BYTES],
+    ['contratoFirmadoAdjunto', 'El contrato firmado', ['application/pdf'], MAX_PDF_BYTES],
+    ['rtoAdjunto', 'El PDF de RTO', ['application/pdf'], MAX_PDF_BYTES],
+  ];
+  const result = {};
+
+  for (const [field, label, allowedMimePrefixes, maxBytes] of definitions) {
+    const validation = validateStoredAttachment(payload[field], { label, allowedMimePrefixes, maxBytes });
+    if (validation.error) {
+      return { error: validation.error };
+    }
+    result[field] = validation.attachment;
+  }
+
+  return { ...result, error: '' };
+}
+
+function collectValidatedParteAttachment(value) {
+  const validation = validateStoredAttachment(value, {
+    label: 'La imagen adjunta del check',
+    allowedMimePrefixes: ['image'],
+    maxBytes: MAX_IMAGE_BYTES,
+  });
+  return {
+    adjunto: validation.attachment,
+    error: validation.error,
+  };
+}
+
 function normalizeVehicleUnitType(value) {
   return String(value || '').trim().toLowerCase() === 'cuatriciclo' ? 'cuatriciclo' : 'camioneta';
 }
@@ -1083,6 +1389,98 @@ function validateVehicleServiceFields(payload = {}) {
   if (kmProximoService && !/^\d{1,7}$/.test(kmProximoService)) {
     return 'El km próximo service debe contener solo números.';
   }
+
+  return '';
+}
+
+function validateObjectiveFields(payload = {}) {
+  const nombre = String(payload.nombre || '').trim();
+  const descripcion = String(payload.descripcion || '').trim();
+
+  if (nombre.length > 120) {
+    return 'El nombre del objetivo no puede superar los 120 caracteres.';
+  }
+
+  if (descripcion.length > 300) {
+    return 'La descripción del objetivo no puede superar los 300 caracteres.';
+  }
+
+  return '';
+}
+
+function validateVehiclePayload(payload = {}, preNormalized = {}) {
+  const patente = String(preNormalized.patente || payload.patente || '').trim();
+  const marca = String(preNormalized.marca || payload.marca || '').trim();
+  const descripcion = String(preNormalized.descripcion || payload.descripcion || '').trim();
+  const chofer = String(payload.chofer || '').trim();
+  const objetivo = String(payload.objetivo || '').trim();
+  const ubicacion = String(payload.ubicacion || '').trim();
+  const ultimaNovedad = String(payload.ultimaNovedad || '').trim();
+  const provincia = String(payload.provincia || 'mendoza').trim();
+  const estado = String(payload.estado || 'disponible').trim();
+  const tipoPropiedad = String(payload.tipoPropiedad || 'propia').trim();
+
+  if (patente.length > 40) return 'La patente o identificador no puede superar los 40 caracteres.';
+  if (marca.length > 60) return 'La marca no puede superar los 60 caracteres.';
+  if (descripcion.length > 160) return 'La descripción de la unidad no puede superar los 160 caracteres.';
+  if (chofer.length > 120) return 'El nombre del chofer no puede superar los 120 caracteres.';
+  if (objetivo.length > 120) return 'El objetivo no puede superar los 120 caracteres.';
+  if (ubicacion.length > 160) return 'La ubicación no puede superar los 160 caracteres.';
+  if (ultimaNovedad.length > 240) return 'La última novedad no puede superar los 240 caracteres.';
+  if (!VALID_PROVINCES.includes(provincia)) return 'La provincia indicada no es válida.';
+  if (!VALID_VEHICLE_STATES.includes(estado)) return 'El estado de la unidad no es válido.';
+  if (!VALID_OWNERSHIP_TYPES.includes(tipoPropiedad)) return 'El tipo de propiedad no es válido.';
+
+  return '';
+}
+
+function validatePartePayload(payload = {}, normalized = {}) {
+  const fecha = String(normalized.fecha || payload.fecha || '').trim();
+  const chofer = String(normalized.chofer || payload.chofer || '').trim();
+  const provincia = String(payload.provincia || 'mendoza').trim();
+  const objetivo = String(payload.objetivo || '').trim();
+  const unidad = String(payload.unidad || '').trim();
+  const observaciones = String(payload.observaciones || '').trim();
+  const desperfectos = String(payload.desperfectos || '').trim();
+  const estado = String(payload.estado || 'completo').trim();
+  const combustible = Number(payload.combustible || 0);
+  const kmInicial = Number(normalized.kmInicial ?? payload.kmInicial ?? 0);
+  const kmFinal = Number(normalized.kmFinal ?? payload.kmFinal ?? 0);
+
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(fecha)) return 'La fecha del parte no es válida.';
+  if (chofer.length > 120) return 'El chofer del parte no puede superar los 120 caracteres.';
+  if (objetivo.length > 120) return 'El objetivo del parte no puede superar los 120 caracteres.';
+  if (unidad.length > 80) return 'La unidad del parte no puede superar los 80 caracteres.';
+  if (observaciones.length > 2000) return 'Las observaciones no pueden superar los 2000 caracteres.';
+  if (desperfectos.length > 2000) return 'Los desperfectos no pueden superar los 2000 caracteres.';
+  if (!VALID_PROVINCES.includes(provincia)) return 'La provincia del parte no es válida.';
+  if (!VALID_PARTE_STATES.includes(estado)) return 'El estado del parte no es válido.';
+  if (!Number.isFinite(combustible) || combustible < 0 || combustible > 1000) return 'El valor de combustible no es válido.';
+  if (!Number.isFinite(kmInicial) || !Number.isFinite(kmFinal) || kmInicial < 0 || kmFinal < 0) return 'Los kilómetros del parte no son válidos.';
+
+  return '';
+}
+
+function validateNovedadPayload(payload = {}, normalized = {}) {
+  const titulo = String(normalized.titulo || payload.titulo || '').trim();
+  const unidad = String(payload.unidad || '').trim();
+  const chofer = String(payload.chofer || '').trim();
+  const objetivo = String(payload.objetivo || '').trim();
+  const fecha = String(payload.fecha || new Date().toISOString().slice(0, 10)).trim();
+  const tipo = String(payload.tipo || 'rotura').trim();
+  const prioridad = String(payload.prioridad || 'pendiente').trim();
+  const estado = String(payload.estado || payload.prioridad || 'pendiente').trim();
+  const descripcion = String(payload.descripcion || '').trim();
+
+  if (titulo.length > 160) return 'El título de la novedad no puede superar los 160 caracteres.';
+  if (unidad.length > 80) return 'La unidad de la novedad no puede superar los 80 caracteres.';
+  if (chofer.length > 120) return 'El chofer de la novedad no puede superar los 120 caracteres.';
+  if (objetivo.length > 120) return 'El objetivo de la novedad no puede superar los 120 caracteres.';
+  if (descripcion.length > 3000) return 'La descripción de la novedad no puede superar los 3000 caracteres.';
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(fecha)) return 'La fecha de la novedad no es válida.';
+  if (!VALID_NOVEDAD_TYPES.includes(tipo)) return 'El tipo de novedad no es válido.';
+  if (!VALID_NOVEDAD_STATUS.includes(prioridad)) return 'La prioridad de la novedad no es válida.';
+  if (!VALID_NOVEDAD_STATUS.includes(estado)) return 'El estado de la novedad no es válido.';
 
   return '';
 }
@@ -1224,4 +1622,34 @@ function requireRoles(roles) {
       next();
     });
   };
+}
+
+function isTrustedApiRequest(req) {
+  const secFetchSite = String(req.get('sec-fetch-site') || '').trim().toLowerCase();
+  if (secFetchSite === 'cross-site') {
+    return false;
+  }
+
+  const originHeader = String(req.get('origin') || '').trim();
+  const refererHeader = String(req.get('referer') || '').trim();
+  const host = String(req.get('host') || '').trim().toLowerCase();
+
+  if (originHeader && !doesRequestUrlMatchHost(originHeader, host)) {
+    return false;
+  }
+
+  if (refererHeader && !doesRequestUrlMatchHost(refererHeader, host)) {
+    return false;
+  }
+
+  return true;
+}
+
+function doesRequestUrlMatchHost(rawUrl, expectedHost) {
+  try {
+    const parsed = new URL(rawUrl);
+    return parsed.host.toLowerCase() === expectedHost;
+  } catch (_error) {
+    return false;
+  }
 }

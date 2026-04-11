@@ -24,6 +24,11 @@ let currentPage = 'inicio';
 let currentFilter = null;
 let sidebarCollapsed = false;
 let currentUser = null;
+let csrfToken = '';
+const UI_PREFERENCES_KEY = 'huarpe.uiPreferences';
+const THEME_PREFERENCES = ['system', 'light', 'dark'];
+let uiPreferences = loadUiPreferences();
+let systemThemeMediaQuery = null;
 const REALTIME_TRACKED_PAGES = ['inicio', 'movilidades', 'objetivos', 'partes', 'novedades', 'reportes'];
 const REALTIME_HEARTBEAT_MS = 3000;
 let realtimeHeartbeatId = null;
@@ -209,8 +214,11 @@ const topbarUser = document.getElementById('topbarUser');
 const topbarAvatar = document.getElementById('topbarAvatar');
 const topbarUserName = document.getElementById('topbarUserName');
 
+applyThemePreference(uiPreferences.theme, { persist: false });
+
 // ---- Init ----
 document.addEventListener('DOMContentLoaded', async () => {
+  initializeThemePreference();
   createToastContainer();
   setCurrentDate();
   updateAlertBadges();
@@ -219,6 +227,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   bindSearch();
   bindModal();
   bindAuth();
+  bindDynamicActions();
   await restoreSession();
 
   if (currentUser) {
@@ -337,6 +346,7 @@ function renderPage(page, filter) {
 // INICIO
 // ===========================
 function renderInicio() {
+  const darkUi = document.body?.dataset.theme === 'dark';
   const mov = DATA.movilidades;
   const totalDisp = mov.filter(m => m.estado === 'disponible').length;
   const totalServ = mov.filter(m => m.estado === 'servicio').length;
@@ -359,14 +369,14 @@ function renderInicio() {
       : 'No hay documentación próxima a vencer en este momento.';
   const panelItems = criticalDocumentAlerts.length ? criticalDocumentAlerts : warningDocumentAlerts;
   const modules = [
-    { page: 'movilidades', accent: '#2563eb', bg: '#dbeafe', color: '#2563eb', icon: 'fa-car', title: 'Movilidades', text: 'Gestión de vehículos, choferes y estados operativos por provincia.', stat: mov.length },
-    { page: 'requerimientos', accent: '#0f766e', bg: '#ccfbf1', color: '#0f766e', icon: 'fa-clipboard-check', title: 'Requerimientos', text: 'Módulo reservado para pedidos, necesidades y seguimiento interno.', stat: 'Próx.' },
-    { page: 'objetivos', accent: '#8b5cf6', bg: '#ede9fe', color: '#8b5cf6', icon: 'fa-bullseye', title: 'Objetivos', text: 'Clientes y proyectos con unidades, choferes y partes asignados.', stat: DATA.objetivos.length },
-    { page: 'partes', accent: '#22c55e', bg: '#dcfce7', color: '#16a34a', icon: 'fa-clipboard-list', title: 'Partes Diarios', text: 'Registro diario de servicios: km, combustible, chofer y observaciones.', stat: DATA.partes.length },
-    { page: 'novedades', accent: '#f59e0b', bg: '#fef3c7', color: '#d97706', icon: 'fa-bell', title: 'Novedades', text: 'Roturas, mantenimientos, incidentes y observaciones activas.', stat: novedadesActivas },
-    { page: 'reportes', accent: '#06b6d4', bg: '#cffafe', color: '#0891b2', icon: 'fa-chart-bar', title: 'Reportes', text: 'Partes por fecha, novedades por unidad, historial y exportación.', stat: '—' },
-    { page: 'configuracion', accent: '#64748b', bg: '#f1f5f9', color: '#475569', icon: 'fa-gear', title: 'Configuración', text: 'Parámetros del sistema, notificaciones y gestión de la plataforma.', stat: '—' },
-    { page: 'usuarios', accent: '#0f766e', bg: '#ccfbf1', color: '#0f766e', icon: 'fa-users', title: 'Usuarios', text: 'Altas, bajas y permisos según el rol asignado.', stat: DATA.usuarios.length },
+    { page: 'movilidades', accent: '#3b82f6', bg: darkUi ? 'rgba(59,130,246,.16)' : '#dbeafe', color: darkUi ? '#93c5fd' : '#2563eb', icon: 'fa-car', title: 'Movilidades', text: 'Gestión de vehículos, choferes y estados operativos por provincia.', stat: mov.length },
+    { page: 'requerimientos', accent: '#14b8a6', bg: darkUi ? 'rgba(20,184,166,.16)' : '#ccfbf1', color: darkUi ? '#99f6e4' : '#0f766e', icon: 'fa-clipboard-check', title: 'Requerimientos', text: 'Módulo reservado para pedidos, necesidades y seguimiento interno.', stat: 'Próx.' },
+    { page: 'objetivos', accent: '#8b5cf6', bg: darkUi ? 'rgba(139,92,246,.16)' : '#ede9fe', color: darkUi ? '#c4b5fd' : '#8b5cf6', icon: 'fa-bullseye', title: 'Objetivos', text: 'Clientes y proyectos con unidades, choferes y partes asignados.', stat: DATA.objetivos.length },
+    { page: 'partes', accent: '#22c55e', bg: darkUi ? 'rgba(34,197,94,.16)' : '#dcfce7', color: darkUi ? '#86efac' : '#16a34a', icon: 'fa-clipboard-list', title: 'Partes Diarios', text: 'Registro diario de servicios: km, combustible, chofer y observaciones.', stat: DATA.partes.length },
+    { page: 'novedades', accent: '#f59e0b', bg: darkUi ? 'rgba(245,158,11,.16)' : '#fef3c7', color: darkUi ? '#fcd34d' : '#d97706', icon: 'fa-bell', title: 'Novedades', text: 'Roturas, mantenimientos, incidentes y observaciones activas.', stat: novedadesActivas },
+    { page: 'reportes', accent: '#06b6d4', bg: darkUi ? 'rgba(6,182,212,.16)' : '#cffafe', color: darkUi ? '#67e8f9' : '#0891b2', icon: 'fa-chart-bar', title: 'Reportes', text: 'Partes por fecha, novedades por unidad, historial y exportación.', stat: '—' },
+    { page: 'configuracion', accent: '#94a3b8', bg: darkUi ? 'rgba(148,163,184,.14)' : '#f1f5f9', color: darkUi ? '#cbd5e1' : '#475569', icon: 'fa-gear', title: 'Configuración', text: 'Parámetros del sistema, notificaciones y gestión de la plataforma.', stat: '—' },
+    { page: 'usuarios', accent: '#14b8a6', bg: darkUi ? 'rgba(20,184,166,.16)' : '#ccfbf1', color: darkUi ? '#99f6e4' : '#0f766e', icon: 'fa-users', title: 'Usuarios', text: 'Altas, bajas y permisos según el rol asignado.', stat: DATA.usuarios.length },
   ].filter(module => canViewPage(module.page));
 
   pageContent.innerHTML = `
@@ -422,7 +432,7 @@ function renderInicio() {
       </div>
     </div>
 
-    <div class="dashboard-alert-panel ${panelToneClass}" ${(criticalDocumentAlerts.length || warningDocumentAlerts.length) ? 'onclick="navigateTo(\'movilidades\')"' : ''}>
+    <div class="dashboard-alert-panel ${panelToneClass}" ${(criticalDocumentAlerts.length || warningDocumentAlerts.length) ? 'data-action="navigate" data-page-action="movilidades"' : ''}>
       <div class="dashboard-alert-header">
         <div>
           <h3><i class="fa-solid fa-triangle-exclamation"></i> Vencimientos documentales</h3>
@@ -455,7 +465,7 @@ function renderInicio() {
     <h3 style="margin-bottom:16px;font-size:15px;font-weight:700;">Módulos</h3>
     <div class="home-cards">
       ${modules.map(module => `
-      <div class="home-card" style="--card-accent:${module.accent};--card-icon-bg:${module.bg};--card-icon-color:${module.color};" onclick="navigateTo('${module.page}')">
+      <div class="home-card" style="--card-accent:${module.accent};--card-icon-bg:${module.bg};--card-icon-color:${module.color};" data-action="navigate" data-page-action="${module.page}">
         <div class="home-card-icon"><i class="fa-solid ${module.icon}"></i></div>
         <h3>${module.title}</h3>
         <p>${module.text}</p>
@@ -519,29 +529,29 @@ function renderMovilidades(filter) {
         <p>Listado general de unidades operativas</p>
       </div>
       <div class="page-actions">
-        ${canCreate ? `<button class="btn btn-primary" onclick="openVehicleTypeSelector()"><i class="fa-solid fa-plus"></i> Nueva unidad</button>` : ''}
-        ${canExportData ? `<button class="btn btn-secondary" onclick="exportarTabla()"><i class="fa-solid fa-file-export"></i> Exportar</button>` : ''}
+        ${canCreate ? `<button class="btn btn-primary" data-action="openVehicleTypeSelector"><i class="fa-solid fa-plus"></i> Nueva unidad</button>` : ''}
+        ${canExportData ? `<button class="btn btn-secondary" data-action="exportarTabla"><i class="fa-solid fa-file-export"></i> Exportar</button>` : ''}
       </div>
     </div>
 
     <div class="filters-bar" id="filtrosMovilidades">
       <div class="filter-group">
         <label>Provincia</label>
-        <select id="filtProvincia" onchange="filtrarMovilidades()">
+        <select id="filtProvincia" data-change-action="filtrarMovilidades">
           <option value="">Todas</option>
           ${renderVehicleProvinceOptions(filter)}
         </select>
       </div>
       <div class="filter-group">
         <label>Objetivo</label>
-        <select id="filtObjetivo" onchange="filtrarMovilidades()">
+        <select id="filtObjetivo" data-change-action="filtrarMovilidades">
           <option value="">Todos</option>
-          ${DATA.objetivos.map(o => `<option value="${o.nombre.toLowerCase()}">${o.nombre}</option>`).join('')}
+          ${DATA.objetivos.map(o => `<option value="${escapeHtml(o.nombre.toLowerCase())}">${escapeHtml(o.nombre)}</option>`).join('')}
         </select>
       </div>
       <div class="filter-group">
         <label>Estado</label>
-        <select id="filtEstado" onchange="filtrarMovilidades()">
+        <select id="filtEstado" data-change-action="filtrarMovilidades">
           <option value="">Todos</option>
           <option value="disponible">Disponible</option>
           <option value="servicio">En servicio</option>
@@ -551,13 +561,13 @@ function renderMovilidades(filter) {
       </div>
       <div class="filter-group">
         <label>Tipo</label>
-        <select id="filtTipoPropiedad" onchange="filtrarMovilidades()">
+        <select id="filtTipoPropiedad" data-change-action="filtrarMovilidades">
           <option value="">Todas</option>
           <option value="propia">Propia</option>
           <option value="alquilada">Alquilada</option>
         </select>
       </div>
-      <button class="btn btn-secondary btn-sm" onclick="limpiarFiltrosMovilidades()"><i class="fa-solid fa-rotate-left"></i> Limpiar</button>
+      <button class="btn btn-secondary btn-sm" data-action="limpiarFiltrosMovilidades"><i class="fa-solid fa-rotate-left"></i> Limpiar</button>
     </div>
 
     <div class="table-wrapper" id="tablaMovilidadesWrapper">
@@ -566,7 +576,7 @@ function renderMovilidades(filter) {
         ${(criticalDocumentCount || warningDocumentCount) ? `<div class="rto-toolbar-alert ${criticalDocumentCount ? 'danger' : 'warning'}"><i class="fa-solid fa-triangle-exclamation"></i> ${buildDocumentToolbarMessage(criticalDocumentCount, warningDocumentCount)}</div>` : ''}
         <input type="text" id="buscarMovilidad" placeholder="Buscar patente, chofer..." 
           style="padding:8px 12px;border:1px solid var(--color-border);border-radius:6px;font-size:13px;outline:none;width:220px;"
-          oninput="filtrarMovilidades()">
+          data-input-action="filtrarMovilidades">
       </div>
       <div id="tablaMovilidadesContent">
         ${renderTablaMovilidades(data, canEdit)}
@@ -604,23 +614,23 @@ function renderTablaMovilidades(data, canEdit = can('editVehicle'), canDelete = 
           ? `<div class="live-edit-badge"><i class="fa-solid fa-pen-ruler"></i> ${escapeHtml(editors.map(user => user.nombre).join(', '))} ${editors.length === 1 ? 'está editando esta unidad' : 'están editando esta unidad'}</div>`
           : '';
         return `<tr class="${rowClasses.join(' ')}">
-        <td><strong>${m.patente}</strong>${editingBadge}</td>
+        <td><strong>${escapeHtml(m.patente)}</strong>${editingBadge}</td>
         <td>${escapeHtml(getVehicleDisplayName(m))}</td>
         <td>${renderVehicleUnitTypeBadge(m.tipoUnidad)}</td>
         <td>${estadoBadge(m.estado)}</td>
         <td>${renderVehicleFileIndicator(m)}</td>
-        <td><i class="fa-solid fa-map-pin" style="color:var(--color-primary);margin-right:4px;"></i>${provinciaLabel(m.provincia)}</td>
-        <td>${m.objetivo}</td>
-        <td>${m.chofer}</td>
-        <td style="color:var(--color-text-light);font-size:12px">${m.ubicacion}</td>
+        <td><i class="fa-solid fa-map-pin" style="color:var(--color-primary);margin-right:4px;"></i>${escapeHtml(provinciaLabel(m.provincia))}</td>
+        <td>${escapeHtml(m.objetivo)}</td>
+        <td>${escapeHtml(m.chofer)}</td>
+        <td style="color:var(--color-text-light);font-size:12px">${escapeHtml(m.ubicacion)}</td>
         <td>${renderVehicleServiceStatus(m)}</td>
         <td>${renderVehicleDocumentStatusStack(m)}</td>
-        <td style="color:var(--color-text-light);font-size:12px;max-width:180px">${m.ultimaNovedad}</td>
+        <td style="color:var(--color-text-light);font-size:12px;max-width:180px">${escapeHtml(m.ultimaNovedad)}</td>
         <td>
           <div style="display:flex;gap:4px">
-            <button class="btn-icon" title="Ver historial" onclick="verHistorialMovilidad(${m.id})"><i class="fa-solid fa-eye"></i></button>
-            ${canEdit ? `<button class="btn-icon ${lockInfo.locked ? 'is-locked' : ''}" title="${escapeHtml(lockInfo.locked ? `En edición por ${lockInfo.namesText}. Abrís la ficha en modo bloqueado.` : 'Editar')}" onclick="editarMovilidad(${m.id})"><i class="fa-solid ${lockInfo.locked ? 'fa-lock' : 'fa-pen'}"></i></button>` : ''}
-            ${canDelete ? `<button class="btn-icon" title="Eliminar" style="color:var(--color-danger)" onclick="eliminarMovilidad(${m.id})"><i class="fa-solid fa-trash"></i></button>` : ''}
+            <button class="btn-icon" title="Ver historial" data-action="verHistorialMovilidad" data-id="${m.id}"><i class="fa-solid fa-eye"></i></button>
+            ${canEdit ? `<button class="btn-icon ${lockInfo.locked ? 'is-locked' : ''}" title="${escapeHtml(lockInfo.locked ? `En edición por ${lockInfo.namesText}. Abrís la ficha en modo bloqueado.` : 'Editar')}" data-action="editarMovilidad" data-id="${m.id}"><i class="fa-solid ${lockInfo.locked ? 'fa-lock' : 'fa-pen'}"></i></button>` : ''}
+            ${canDelete ? `<button class="btn-icon" title="Eliminar" style="color:var(--color-danger)" data-action="eliminarMovilidad" data-id="${m.id}"><i class="fa-solid fa-trash"></i></button>` : ''}
           </div>
         </td>
       </tr>`;}).join('')}
@@ -688,7 +698,7 @@ function renderObjetivos(filter) {
         <p>Clientes y proyectos asignados</p>
       </div>
       <div class="page-actions">
-        ${canCreate ? `<button class="btn btn-primary" onclick="openModalNuevoObjetivo()"><i class="fa-solid fa-plus"></i> Nuevo objetivo</button>` : ''}
+        ${canCreate ? `<button class="btn btn-primary" data-action="openModalNuevoObjetivo"><i class="fa-solid fa-plus"></i> Nuevo objetivo</button>` : ''}
       </div>
     </div>
     ${contenido}
@@ -697,12 +707,12 @@ function renderObjetivos(filter) {
 
 function objetivoCard(o) {
   return `
-    <div class="objetivo-card" onclick="verDetalleObjetivo(${o.id})">
+    <div class="objetivo-card" data-action="verDetalleObjetivo" data-id="${o.id}">
       <div class="objetivo-card-header">
         ${renderObjectiveBrandMark(o, 'card')}
         <div>
-          <h3>${o.nombre}</h3>
-          <p>${o.descripcion}</p>
+          <h3>${escapeHtml(o.nombre)}</h3>
+          <p>${escapeHtml(o.descripcion)}</p>
         </div>
       </div>
       <div class="objetivo-stats">
@@ -712,8 +722,8 @@ function objetivoCard(o) {
         <div class="objetivo-stat"><div class="val">${o.novedades}</div><div class="lbl">Novedades</div></div>
       </div>
       <div style="margin-top:12px;display:flex;align-items:center;justify-content:space-between">
-        <span class="status-badge status-${o.estado === 'activo' ? 'servicio' : 'fuera'}">${o.estado === 'activo' ? 'Activo' : 'Inactivo'}</span>
-        <button class="btn btn-secondary btn-sm" onclick="event.stopPropagation();verDetalleObjetivo(${o.id})"><i class="fa-solid fa-eye"></i> Ver ficha</button>
+        <span class="status-badge status-${o.estado === 'activo' ? 'servicio' : 'fuera'}">${escapeHtml(o.estado === 'activo' ? 'Activo' : 'Inactivo')}</span>
+        <button class="btn btn-secondary btn-sm" data-action="verDetalleObjetivo" data-id="${o.id}"><i class="fa-solid fa-eye"></i> Ver ficha</button>
       </div>
     </div>
   `;
@@ -788,23 +798,23 @@ function renderPartes() {
         <p>Registro diario de servicios por unidad</p>
       </div>
       <div class="page-actions">
-        ${canCreate ? `<button class="btn btn-primary" onclick="openModalNuevoParte()"><i class="fa-solid fa-plus"></i> Cargar parte</button>` : ''}
-        ${canExportData ? `<button class="btn btn-secondary" onclick="exportarTabla()"><i class="fa-solid fa-file-export"></i> Exportar</button>` : ''}
+        ${canCreate ? `<button class="btn btn-primary" data-action="openModalNuevoParte"><i class="fa-solid fa-plus"></i> Cargar parte</button>` : ''}
+        ${canExportData ? `<button class="btn btn-secondary" data-action="exportarTabla"><i class="fa-solid fa-file-export"></i> Exportar</button>` : ''}
       </div>
     </div>
 
     <div class="filters-bar">
       <div class="filter-group">
         <label>Fecha desde</label>
-        <input type="date" id="filtFechaDesde" onchange="filtrarPartes()">
+        <input type="date" id="filtFechaDesde" data-change-action="filtrarPartes">
       </div>
       <div class="filter-group">
         <label>Fecha hasta</label>
-        <input type="date" id="filtFechaHasta" onchange="filtrarPartes()">
+        <input type="date" id="filtFechaHasta" data-change-action="filtrarPartes">
       </div>
       <div class="filter-group">
         <label>Provincia</label>
-        <select id="filtParteProvincia" onchange="filtrarPartes()">
+        <select id="filtParteProvincia" data-change-action="filtrarPartes">
           <option value="">Todas</option>
           <option value="mendoza">Mendoza</option>
           <option value="san-juan">San Juan</option>
@@ -813,12 +823,12 @@ function renderPartes() {
       </div>
       <div class="filter-group">
         <label>Objetivo</label>
-        <select id="filtParteObjetivo" onchange="filtrarPartes()">
+        <select id="filtParteObjetivo" data-change-action="filtrarPartes">
           <option value="">Todos</option>
-          ${DATA.objetivos.map(o => `<option value="${o.nombre}">${o.nombre}</option>`).join('')}
+          ${DATA.objetivos.map(o => `<option value="${escapeHtml(o.nombre)}">${escapeHtml(o.nombre)}</option>`).join('')}
         </select>
       </div>
-      <button class="btn btn-secondary btn-sm" onclick="limpiarFiltrosPartes()"><i class="fa-solid fa-rotate-left"></i> Limpiar</button>
+      <button class="btn btn-secondary btn-sm" data-action="limpiarFiltrosPartes"><i class="fa-solid fa-rotate-left"></i> Limpiar</button>
     </div>
 
     <div class="table-wrapper">
@@ -826,7 +836,7 @@ function renderPartes() {
         <h3 id="countPartes">${data.length} parte${data.length !== 1 ? 's' : ''}</h3>
         <input type="text" id="buscarParte" placeholder="Buscar unidad, chofer..." 
           style="padding:8px 12px;border:1px solid var(--color-border);border-radius:6px;font-size:13px;outline:none;width:220px;"
-          oninput="filtrarPartes()">
+          data-input-action="filtrarPartes">
       </div>
       <div id="tablaPartesContent">
         ${renderTablaPartes(data, canEdit)}
@@ -846,10 +856,10 @@ function renderTablaPartes(data, canEdit = can('editPart')) {
     <tbody>
       ${data.map(p => `<tr>
         <td>${formatFecha(p.fecha)}</td>
-        <td>${provinciaLabel(p.provincia)}</td>
-        <td>${p.objetivo}</td>
-        <td><strong>${p.unidad}</strong></td>
-        <td>${p.chofer}</td>
+        <td>${escapeHtml(provinciaLabel(p.provincia))}</td>
+        <td>${escapeHtml(p.objetivo)}</td>
+        <td><strong>${escapeHtml(p.unidad)}</strong></td>
+        <td>${escapeHtml(p.chofer)}</td>
         <td>${p.kmInicial.toLocaleString()}</td>
         <td>${p.kmFinal.toLocaleString()}</td>
         <td><strong>${(p.kmFinal - p.kmInicial).toLocaleString()} km</strong></td>
@@ -857,8 +867,8 @@ function renderTablaPartes(data, canEdit = can('editPart')) {
         <td>${p.estado === 'completo' ? '<span class="status-badge status-servicio">Completo</span>' : '<span class="status-badge status-mantenimiento">Observado</span>'}</td>
         <td>
           <div style="display:flex;gap:4px">
-            <button class="btn-icon" title="Ver detalle" onclick="verDetalleParte(${p.id})"><i class="fa-solid fa-eye"></i></button>
-            ${canEdit ? `<button class="btn-icon" title="Editar" onclick="editarParte(${p.id})"><i class="fa-solid fa-pen"></i></button>` : ''}
+            <button class="btn-icon" title="Ver detalle" data-action="verDetalleParte" data-id="${p.id}"><i class="fa-solid fa-eye"></i></button>
+            ${canEdit ? `<button class="btn-icon" title="Editar" data-action="editarParte" data-id="${p.id}"><i class="fa-solid fa-pen"></i></button>` : ''}
           </div>
         </td>
       </tr>`).join('')}
@@ -906,14 +916,14 @@ function renderNovedades() {
         <p>Roturas, mantenimientos, incidentes y observaciones operativas</p>
       </div>
       <div class="page-actions">
-        ${canCreate ? `<button class="btn btn-primary" onclick="openModalNovedad()"><i class="fa-solid fa-plus"></i> Nueva novedad</button>` : ''}
+        ${canCreate ? `<button class="btn btn-primary" data-action="openModalNovedad"><i class="fa-solid fa-plus"></i> Nueva novedad</button>` : ''}
       </div>
     </div>
 
     <div class="filters-bar" style="margin-bottom:20px">
       <div class="filter-group">
         <label>Prioridad</label>
-        <select id="filtNovPrioridad" onchange="filtrarNovedades()">
+        <select id="filtNovPrioridad" data-change-action="filtrarNovedades">
           <option value="">Todas</option>
           <option value="urgente">🔴 Urgente</option>
           <option value="pendiente">🟡 Pendiente</option>
@@ -922,7 +932,7 @@ function renderNovedades() {
       </div>
       <div class="filter-group">
         <label>Tipo</label>
-        <select id="filtNovTipo" onchange="filtrarNovedades()">
+        <select id="filtNovTipo" data-change-action="filtrarNovedades">
           <option value="">Todos</option>
           <option value="rotura">Rotura</option>
           <option value="mantenimiento">Mantenimiento</option>
@@ -932,9 +942,9 @@ function renderNovedades() {
       </div>
       <div class="filter-group">
         <label>Buscar</label>
-        <input type="text" id="filtNovBusca" placeholder="Unidad, descripción..." oninput="filtrarNovedades()">
+        <input type="text" id="filtNovBusca" placeholder="Unidad, descripción..." data-input-action="filtrarNovedades">
       </div>
-      <button class="btn btn-secondary btn-sm" onclick="limpiarFiltrosNovedades()"><i class="fa-solid fa-rotate-left"></i> Limpiar</button>
+      <button class="btn btn-secondary btn-sm" data-action="limpiarFiltrosNovedades"><i class="fa-solid fa-rotate-left"></i> Limpiar</button>
     </div>
 
     <div id="listaNovedades">
@@ -952,26 +962,27 @@ function novedadCard(n) {
   const canEdit = can('editNews');
   const canResolve = can('resolveNews');
   const tipos = { rotura: 'fa-wrench', mantenimiento: 'fa-screwdriver-wrench', retraso: 'fa-clock', incidente: 'fa-triangle-exclamation', observacion: 'fa-eye' };
+  const estadoLabel = n.estado.charAt(0).toUpperCase() + n.estado.slice(1);
   return `
     <div class="novedad-card ${n.estado}">
       <div class="novedad-header">
         <div style="display:flex;align-items:center;gap:8px">
           <i class="fa-solid ${tipos[n.tipo] || 'fa-circle-info'}" style="color:${n.estado === 'urgente' ? '#ef4444' : n.estado === 'pendiente' ? '#f59e0b' : '#22c55e'}"></i>
-          <span class="novedad-title">${n.titulo}</span>
+          <span class="novedad-title">${escapeHtml(n.titulo)}</span>
           ${n.generadoAutomaticamente ? '<span class="auto-badge">Automática</span>' : ''}
         </div>
-        <span class="priority-badge priority-${n.estado}">${n.estado.charAt(0).toUpperCase() + n.estado.slice(1)}</span>
+        <span class="priority-badge priority-${n.estado}">${escapeHtml(estadoLabel)}</span>
       </div>
       <div class="novedad-meta">
-        <span><i class="fa-solid fa-car"></i> ${n.unidad}</span>
-        <span><i class="fa-solid fa-user"></i> ${n.chofer}</span>
-        <span><i class="fa-solid fa-bullseye"></i> ${n.objetivo}</span>
+        <span><i class="fa-solid fa-car"></i> ${escapeHtml(n.unidad)}</span>
+        <span><i class="fa-solid fa-user"></i> ${escapeHtml(n.chofer)}</span>
+        <span><i class="fa-solid fa-bullseye"></i> ${escapeHtml(n.objetivo)}</span>
         <span><i class="fa-solid fa-calendar"></i> ${formatFecha(n.fecha)}</span>
       </div>
-      <div class="novedad-body">${n.descripcion}</div>
+      <div class="novedad-body">${escapeHtml(n.descripcion)}</div>
       <div class="novedad-actions">
-        ${canResolve && n.estado !== 'resuelto' ? `<button class="btn btn-success btn-sm" onclick="resolverNovedad(${n.id})"><i class="fa-solid fa-check"></i> Marcar resuelto</button>` : ''}
-        ${canEdit ? `<button class="btn btn-secondary btn-sm" onclick="editarNovedad(${n.id})"><i class="fa-solid fa-pen"></i> Editar</button>` : ''}
+        ${canResolve && n.estado !== 'resuelto' ? `<button class="btn btn-success btn-sm" data-action="resolverNovedad" data-id="${n.id}"><i class="fa-solid fa-check"></i> Marcar resuelto</button>` : ''}
+        ${canEdit ? `<button class="btn btn-secondary btn-sm" data-action="editarNovedad" data-id="${n.id}"><i class="fa-solid fa-pen"></i> Editar</button>` : ''}
         ${!canEdit && !canResolve ? `<span style="font-size:12px;color:var(--color-text-light)">Solo lectura</span>` : ''}
       </div>
     </div>
@@ -1014,22 +1025,22 @@ function renderReportes() {
     </div>
 
     <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:18px;margin-bottom:28px">
-      <div class="report-card" onclick="reportePartesFecha()">
+      <div class="report-card" data-action="reportePartesFecha">
         <div class="report-card-icon"><i class="fa-solid fa-calendar-days"></i></div>
         <h3>Partes por fecha</h3>
         <p>Filtrá y revisá los partes diarios por rango de fechas específico.</p>
       </div>
-      <div class="report-card" onclick="reporteNovedadesUnidad()">
+      <div class="report-card" data-action="reporteNovedadesUnidad">
         <div class="report-card-icon" style="background:#ede9fe;color:#8b5cf6"><i class="fa-solid fa-truck"></i></div>
         <h3>Novedades por unidad</h3>
         <p>Historial de incidentes y mantenimientos por cada vehículo.</p>
       </div>
-      <div class="report-card" onclick="reporteHistorialObjetivo()">
+      <div class="report-card" data-action="reporteHistorialObjetivo">
         <div class="report-card-icon" style="background:#dcfce7;color:#16a34a"><i class="fa-solid fa-clock-rotate-left"></i></div>
         <h3>Historial por objetivo</h3>
         <p>Actividad completa agrupada por cliente o proyecto.</p>
       </div>
-      <div class="report-card" onclick="reporteExportar()">
+      <div class="report-card" data-action="reporteExportar">
         <div class="report-card-icon" style="background:#fef3c7;color:#d97706"><i class="fa-solid fa-file-arrow-down"></i></div>
         <h3>Exportar datos</h3>
         <p>Descargá los datos en formato CSV/Excel según el módulo.</p>
@@ -1064,7 +1075,7 @@ function reportePartesFecha() {
       <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
         <input type="date" id="rFechaDesde" style="padding:7px 10px;border:1px solid var(--color-border);border-radius:6px;font-size:13px">
         <input type="date" id="rFechaHasta" style="padding:7px 10px;border:1px solid var(--color-border);border-radius:6px;font-size:13px">
-        <button class="btn btn-primary btn-sm" onclick="aplicarReportePartesFecha()"><i class="fa-solid fa-search"></i> Buscar</button>
+        <button class="btn btn-primary btn-sm" data-action="aplicarReportePartesFecha"><i class="fa-solid fa-search"></i> Buscar</button>
       </div>
     </div>
     <div id="reportePartesResult">${renderTablaPartes(DATA.partes)}</div>
@@ -1136,9 +1147,9 @@ function reporteExportar() {
     <h3 style="margin-bottom:16px;font-size:15px;font-weight:700">Exportar datos</h3>
     <div style="display:flex;flex-direction:column;gap:10px">
       ${canExportData ? `
-      <button class="btn btn-secondary" onclick="exportarCSV('movilidades')"><i class="fa-solid fa-file-csv"></i> Exportar Movilidades (.csv)</button>
-      <button class="btn btn-secondary" onclick="exportarCSV('partes')"><i class="fa-solid fa-file-csv"></i> Exportar Partes Diarios (.csv)</button>
-      <button class="btn btn-secondary" onclick="exportarCSV('novedades')"><i class="fa-solid fa-file-csv"></i> Exportar Novedades (.csv)</button>` : '<p style="font-size:13px;color:var(--color-text-light)">Tu rol no tiene permiso para exportar datos.</p>'}
+      <button class="btn btn-secondary" data-action="exportarCSV" data-export-kind="movilidades"><i class="fa-solid fa-file-csv"></i> Exportar Movilidades (.csv)</button>
+      <button class="btn btn-secondary" data-action="exportarCSV" data-export-kind="partes"><i class="fa-solid fa-file-csv"></i> Exportar Partes Diarios (.csv)</button>
+      <button class="btn btn-secondary" data-action="exportarCSV" data-export-kind="novedades"><i class="fa-solid fa-file-csv"></i> Exportar Novedades (.csv)</button>` : '<p style="font-size:13px;color:var(--color-text-light)">Tu rol no tiene permiso para exportar datos.</p>'}
     </div>
     <p style="margin-top:14px;font-size:12px;color:var(--color-text-light)">Los archivos se descargarán en formato CSV compatible con Excel.</p>
   `;
@@ -1156,7 +1167,7 @@ function renderConfiguracion() {
         <p>Parámetros y preferencias del sistema</p>
       </div>
       <div class="page-actions">
-        ${canManage ? `<button class="btn btn-primary" onclick="guardarConfiguracion()"><i class="fa-solid fa-floppy-disk"></i> Guardar cambios</button>` : ''}
+        ${canManage ? `<button class="btn btn-primary" data-action="guardarConfiguracion"><i class="fa-solid fa-floppy-disk"></i> Guardar cambios</button>` : ''}
       </div>
     </div>
 
@@ -1192,15 +1203,31 @@ function renderConfiguracion() {
       <div class="config-grid">
         <div class="config-item">
           <div class="config-item-info"><h4>Idioma</h4><p>Idioma de la interfaz</p></div>
-          <select style="padding:6px 10px;border:1px solid var(--color-border);border-radius:6px;font-size:12px">
+          <select class="config-select">
             <option>Español</option>
             <option>English</option>
           </select>
+        </div>
+        <div class="config-item config-item-theme">
+          <div class="config-item-info">
+            <h4>Tema visual</h4>
+            <p>Elegí un esquema claro, oscuro o automático según el sistema.</p>
+          </div>
+          <div class="config-item-actions">
+            <select id="themePreferenceSelect" class="config-select" data-change-action="previewThemePreference" ${canManage ? '' : 'disabled'}>
+              <option value="system" ${uiPreferences.theme === 'system' ? 'selected' : ''}>Sistema</option>
+              <option value="light" ${uiPreferences.theme === 'light' ? 'selected' : ''}>Claro</option>
+              <option value="dark" ${uiPreferences.theme === 'dark' ? 'selected' : ''}>Oscuro</option>
+            </select>
+            <span class="config-theme-badge" id="themeResolvedBadge">${getResolvedThemeLabel(uiPreferences.theme)}</span>
+          </div>
         </div>
         ${configItem('Modo compacto', 'Reducir espaciado en tablas y listas', false)}
       </div>
     </div>
   `;
+
+  syncThemePreferenceControls();
 }
 
 function configItem(titulo, desc, checked) {
@@ -1231,7 +1258,7 @@ async function renderUsuarios() {
         <p>Gestión de acceso y roles</p>
       </div>
       <div class="page-actions">
-        <button class="btn btn-primary" onclick="openModalNuevoUsuario()"><i class="fa-solid fa-user-plus"></i> Nuevo usuario</button>
+        <button class="btn btn-primary" data-action="openModalNuevoUsuario"><i class="fa-solid fa-user-plus"></i> Nuevo usuario</button>
       </div>
     </div>
     <div class="table-wrapper">
@@ -1252,18 +1279,18 @@ async function renderUsuarios() {
           ${DATA.usuarios.map(u => `<tr>
             <td>
               <div style="display:flex;align-items:center;gap:10px">
-                <div class="avatar sm">${u.nombre.split(' ').map(p => p[0]).join('')}</div>
-                <strong>${u.nombre}</strong>
+                <div class="avatar sm">${escapeHtml(u.nombre.split(' ').map(p => p[0]).join(''))}</div>
+                <strong>${escapeHtml(u.nombre)}</strong>
               </div>
             </td>
-            <td style="color:var(--color-text-light)">${u.email}</td>
-            <td><span style="background:#dbeafe;color:#1e40af;padding:3px 10px;border-radius:20px;font-size:11px;font-weight:600;text-transform:capitalize">${u.rol}</span></td>
-            <td><span class="status-badge ${u.estado === 'activo' ? 'status-disponible' : 'status-fuera'}">${u.estado}</span></td>
+            <td style="color:var(--color-text-light)">${escapeHtml(u.email)}</td>
+            <td><span style="background:#dbeafe;color:#1e40af;padding:3px 10px;border-radius:20px;font-size:11px;font-weight:600;text-transform:capitalize">${escapeHtml(u.rol)}</span></td>
+            <td><span class="status-badge ${u.estado === 'activo' ? 'status-disponible' : 'status-fuera'}">${escapeHtml(u.estado)}</span></td>
             <td style="font-size:12px;color:var(--color-text-light)">${u.ultima ? formatFecha(u.ultima) : 'Sin ingreso'}</td>
             <td>
               ${admin ? `<div style="display:flex;gap:4px">
-                <button class="btn-icon" title="Editar" onclick="editarUsuario(${u.id})"><i class="fa-solid fa-pen"></i></button>
-                ${currentUser && currentUser.id !== u.id ? `<button class="btn-icon" title="Eliminar" style="color:var(--color-danger)" onclick="eliminarUsuario(${u.id})"><i class="fa-solid fa-trash"></i></button>` : '<span style="font-size:12px;color:var(--color-text-light)">Sesión actual</span>'}
+                <button class="btn-icon" title="Editar" data-action="editarUsuario" data-id="${u.id}"><i class="fa-solid fa-pen"></i></button>
+                ${currentUser && currentUser.id !== u.id ? `<button class="btn-icon" title="Eliminar" style="color:var(--color-danger)" data-action="eliminarUsuario" data-id="${u.id}"><i class="fa-solid fa-trash"></i></button>` : '<span style="font-size:12px;color:var(--color-text-light)">Sesión actual</span>'}
               </div>` : `<span style="font-size:12px;color:var(--color-text-light)">Solo lectura</span>`}
             </td>
           </tr>`).join('')}
@@ -1278,7 +1305,7 @@ async function renderUsuarios() {
         <p>Gestión de acceso y roles</p>
       </div>
       <div class="page-actions">
-        ${admin ? `<button class="btn btn-primary" onclick="openModalNuevoUsuario()"><i class="fa-solid fa-user-plus"></i> Nuevo usuario</button>` : ''}
+        ${admin ? `<button class="btn btn-primary" data-action="openModalNuevoUsuario"><i class="fa-solid fa-user-plus"></i> Nuevo usuario</button>` : ''}
       </div>
     </div>
     <div class="table-wrapper">
@@ -1309,6 +1336,111 @@ function bindModal() {
   modalOverlay.addEventListener('click', e => { if (e.target === modalOverlay) closeModal(); });
 }
 
+function bindDynamicActions() {
+  document.addEventListener('click', handleDynamicClick);
+  document.addEventListener('change', handleDynamicChange);
+  document.addEventListener('input', handleDynamicInput);
+}
+
+function handleDynamicClick(event) {
+  const actionEl = event.target.closest('[data-action]');
+  if (!actionEl) return;
+
+  const action = actionEl.dataset.action;
+  const clickHandlers = {
+    navigate: el => navigateTo(el.dataset.pageAction, el.dataset.filter || null),
+    openVehicleTypeSelector: () => openVehicleTypeSelector(),
+    exportarTabla: () => exportarTabla(),
+    limpiarFiltrosMovilidades: () => limpiarFiltrosMovilidades(),
+    verHistorialMovilidad: el => verHistorialMovilidad(Number(el.dataset.id)),
+    editarMovilidad: el => editarMovilidad(Number(el.dataset.id)),
+    eliminarMovilidad: el => eliminarMovilidad(Number(el.dataset.id)),
+    openModalNuevoObjetivo: () => openModalNuevoObjetivo(),
+    verDetalleObjetivo: el => verDetalleObjetivo(Number(el.dataset.id)),
+    openModalNuevoParte: () => openModalNuevoParte(),
+    limpiarFiltrosPartes: () => limpiarFiltrosPartes(),
+    verDetalleParte: el => verDetalleParte(Number(el.dataset.id)),
+    editarParte: el => editarParte(Number(el.dataset.id)),
+    openModalNovedad: () => openModalNovedad(),
+    limpiarFiltrosNovedades: () => limpiarFiltrosNovedades(),
+    resolverNovedad: el => resolverNovedad(Number(el.dataset.id)),
+    editarNovedad: el => editarNovedad(Number(el.dataset.id)),
+    reportePartesFecha: () => reportePartesFecha(),
+    reporteNovedadesUnidad: () => reporteNovedadesUnidad(),
+    reporteHistorialObjetivo: () => reporteHistorialObjetivo(),
+    reporteExportar: () => reporteExportar(),
+    aplicarReportePartesFecha: () => aplicarReportePartesFecha(),
+    exportarCSV: el => exportarCSV(el.dataset.exportKind),
+    guardarConfiguracion: () => guardarConfiguracion(),
+    openModalNuevoUsuario: () => openModalNuevoUsuario(),
+    editarUsuario: el => editarUsuario(Number(el.dataset.id)),
+    eliminarUsuario: el => eliminarUsuario(Number(el.dataset.id)),
+    refreshCurrentPageData: () => refreshCurrentPageData(),
+    closeModal: () => closeModal(),
+    openChangePasswordModal: () => openChangePasswordModal(),
+    logout: () => logout(),
+    openAccountModal: () => openAccountModal(),
+    changeCurrentPassword: () => changeCurrentPassword(),
+    openModalNuevaMovilidad: el => openModalNuevaMovilidad(el.dataset.unitType || 'camioneta'),
+    guardarMovilidad: () => guardarMovilidad(),
+    guardarParte: () => guardarParte(),
+    guardarNovedad: () => guardarNovedad(),
+    guardarObjetivo: () => guardarObjetivo(),
+    guardarUsuario: () => guardarUsuario(),
+    actualizarUsuario: el => actualizarUsuario(Number(el.dataset.id)),
+    switchTab: el => switchTab(el, el.dataset.targetTab),
+    exportarPartePDF: el => exportarPartePDF(Number(el.dataset.id)),
+    imprimirParte: el => imprimirParte(Number(el.dataset.id)),
+    darDeBajaMovilidad: el => darDeBajaMovilidad(Number(el.dataset.id)),
+    aplicarEdicionMovilidad: el => aplicarEdicionMovilidad(Number(el.dataset.id)),
+    aplicarEdicionParte: el => aplicarEdicionParte(Number(el.dataset.id)),
+    aplicarEdicionNovedad: el => aplicarEdicionNovedad(Number(el.dataset.id)),
+    handleSearchResult: el => handleSearchResult(el.dataset.pageAction, el.dataset.filter || ''),
+    clearVehicleDocument: el => clearVehicleDocument(el.dataset.prefix, el.dataset.key),
+    clearParteAttachment: el => clearParteAttachment(el.dataset.prefix),
+  };
+
+  const handler = clickHandlers[action];
+  if (!handler) return;
+  event.preventDefault();
+  handler(actionEl, event);
+}
+
+function handleDynamicChange(event) {
+  const actionEl = event.target.closest('[data-change-action]');
+  if (!actionEl) return;
+
+  const changeHandlers = {
+    filtrarMovilidades: () => filtrarMovilidades(),
+    filtrarPartes: () => filtrarPartes(),
+    filtrarNovedades: () => filtrarNovedades(),
+    previewThemePreference: el => previewThemePreference(el),
+    syncParteVehicleData: el => syncParteVehicleData(el.dataset.prefix),
+    syncEditNovedadDriver: () => syncEditNovedadDriver(),
+    handleVehicleDocumentChange: el => handleVehicleDocumentChange(el.dataset.prefix, el.dataset.key),
+    handleParteAttachmentChange: el => handleParteAttachmentChange(el.dataset.prefix),
+  };
+
+  const handler = changeHandlers[actionEl.dataset.changeAction];
+  if (!handler) return;
+  handler(actionEl, event);
+}
+
+function handleDynamicInput(event) {
+  const actionEl = event.target.closest('[data-input-action]');
+  if (!actionEl) return;
+
+  const inputHandlers = {
+    filtrarMovilidades: () => filtrarMovilidades(),
+    filtrarPartes: () => filtrarPartes(),
+    filtrarNovedades: () => filtrarNovedades(),
+  };
+
+  const handler = inputHandlers[actionEl.dataset.inputAction];
+  if (!handler) return;
+  handler(actionEl, event);
+}
+
 function bindAuth() {
   loginForm?.addEventListener('submit', handleLogin);
   passwordToggle?.addEventListener('click', toggleLoginPasswordVisibility);
@@ -1327,6 +1459,91 @@ function bindAuth() {
 function persistRememberSessionPreference() {
   if (!rememberSession) return;
   window.localStorage.setItem('huarpe.rememberSession', String(rememberSession.checked));
+}
+
+function loadUiPreferences() {
+  try {
+    const rawValue = window.localStorage.getItem(UI_PREFERENCES_KEY);
+    if (!rawValue) return { theme: 'system' };
+    const parsed = JSON.parse(rawValue);
+    return { theme: normalizeThemePreference(parsed?.theme) };
+  } catch (_error) {
+    return { theme: 'system' };
+  }
+}
+
+function saveUiPreferences() {
+  window.localStorage.setItem(UI_PREFERENCES_KEY, JSON.stringify(uiPreferences));
+}
+
+function normalizeThemePreference(value) {
+  return THEME_PREFERENCES.includes(value) ? value : 'system';
+}
+
+function getResolvedTheme(themePreference = uiPreferences.theme) {
+  const normalizedTheme = normalizeThemePreference(themePreference);
+  if (normalizedTheme === 'system') {
+    return window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+  }
+  return normalizedTheme;
+}
+
+function getResolvedThemeLabel(themePreference = uiPreferences.theme) {
+  const normalizedTheme = normalizeThemePreference(themePreference);
+  const resolvedTheme = getResolvedTheme(normalizedTheme);
+  if (normalizedTheme === 'system') {
+    return `Sistema · ${resolvedTheme === 'dark' ? 'Oscuro activo' : 'Claro activo'}`;
+  }
+  return resolvedTheme === 'dark' ? 'Oscuro activo' : 'Claro activo';
+}
+
+function applyThemePreference(themePreference, { persist = true } = {}) {
+  uiPreferences.theme = normalizeThemePreference(themePreference);
+  const resolvedTheme = getResolvedTheme(uiPreferences.theme);
+
+  document.body.dataset.theme = resolvedTheme;
+  document.body.dataset.themePreference = uiPreferences.theme;
+  document.documentElement.style.colorScheme = resolvedTheme;
+
+  if (persist) {
+    saveUiPreferences();
+  }
+
+  syncThemePreferenceControls();
+}
+
+function syncThemePreferenceControls() {
+  const themeSelect = document.getElementById('themePreferenceSelect');
+  const themeBadge = document.getElementById('themeResolvedBadge');
+  if (themeSelect) {
+    themeSelect.value = uiPreferences.theme;
+  }
+  if (themeBadge) {
+    themeBadge.textContent = getResolvedThemeLabel(uiPreferences.theme);
+  }
+}
+
+function initializeThemePreference() {
+  if (window.matchMedia && !systemThemeMediaQuery) {
+    systemThemeMediaQuery = window.matchMedia('(prefers-color-scheme: dark)');
+    const handleSystemThemeChange = () => {
+      if (uiPreferences.theme === 'system') {
+        applyThemePreference('system', { persist: false });
+      }
+    };
+
+    if (typeof systemThemeMediaQuery.addEventListener === 'function') {
+      systemThemeMediaQuery.addEventListener('change', handleSystemThemeChange);
+    } else if (typeof systemThemeMediaQuery.addListener === 'function') {
+      systemThemeMediaQuery.addListener(handleSystemThemeChange);
+    }
+  }
+
+  applyThemePreference(uiPreferences.theme, { persist: false });
+}
+
+function previewThemePreference(selectEl) {
+  applyThemePreference(selectEl?.value || uiPreferences.theme);
 }
 
 function toggleLoginPasswordVisibility() {
@@ -1448,7 +1665,7 @@ function renderRealtimePageContext() {
       <div class="realtime-change-block ${realtimeState.pendingRefresh ? 'pending' : ''}">
         <div class="realtime-presence-title"><i class="fa-solid fa-arrows-rotate"></i> Cambios</div>
         <div class="realtime-presence-text">${escapeHtml(changeText)}</div>
-        ${realtimeState.pendingRefresh ? '<button class="btn btn-secondary btn-sm" onclick="refreshCurrentPageData()"><i class="fa-solid fa-rotate"></i> Refrescar</button>' : ''}
+        ${realtimeState.pendingRefresh ? '<button class="btn btn-secondary btn-sm" data-action="refreshCurrentPageData"><i class="fa-solid fa-rotate"></i> Refrescar</button>' : ''}
       </div>
     </div>
   `;
@@ -1543,6 +1760,32 @@ function renderMobilityEditLockNotice(lockInfo, patente = '') {
   `;
 }
 
+function updateMobilityEditLockNotice(noticeHost, lockInfo, patente = '') {
+  if (!noticeHost) return;
+  if (!lockInfo?.locked) {
+    noticeHost.replaceChildren();
+    return;
+  }
+
+  noticeHost.replaceChildren();
+  const wrapper = document.createElement('div');
+  wrapper.className = 'live-edit-lock-notice';
+  wrapper.id = 'mobilityEditLockNotice';
+
+  const title = document.createElement('div');
+  title.className = 'live-edit-lock-title';
+  const icon = document.createElement('i');
+  icon.className = 'fa-solid fa-lock';
+  title.append(icon, document.createTextNode(' Edicion bloqueada'));
+
+  const text = document.createElement('div');
+  text.className = 'live-edit-lock-text';
+  text.textContent = `${lockInfo.namesText} ${lockInfo.editors.length === 1 ? 'ya está trabajando sobre' : 'ya están trabajando sobre'} ${patente || 'esta unidad'}. La ficha queda en solo lectura hasta que se libere.`;
+
+  wrapper.append(title, text);
+  noticeHost.appendChild(wrapper);
+}
+
 function syncRealtimeMobilityUI() {
   if (currentPage === 'movilidades' && document.getElementById('tablaMovilidadesContent')) {
     filtrarMovilidades();
@@ -1562,7 +1805,7 @@ function syncMobilityEditModalState() {
   const deactivateButton = document.getElementById('mobilityEditDeactivateButton');
 
   if (noticeHost) {
-    noticeHost.innerHTML = renderMobilityEditLockNotice(lockInfo, mobility?.patente || mobility?.descripcion || 'esta unidad');
+    updateMobilityEditLockNotice(noticeHost, lockInfo, mobility?.patente || mobility?.descripcion || 'esta unidad');
   }
 
   if (fieldset) {
@@ -1612,6 +1855,7 @@ async function handleLogin(e) {
     });
 
     currentUser = data.user;
+    csrfToken = data.csrfToken || '';
     await loadOperationalData();
     if (isAdmin()) {
       await loadUsers();
@@ -1634,12 +1878,14 @@ async function restoreSession() {
   try {
     const data = await apiRequest('/api/auth/session', { suppressAuthHandling: true });
     currentUser = data.user;
+    csrfToken = data.csrfToken || '';
     await loadOperationalData();
     if (isAdmin()) {
       await loadUsers();
     }
   } catch (_error) {
     currentUser = null;
+    csrfToken = '';
     DATA.usuarios = [];
   }
 }
@@ -1669,6 +1915,7 @@ async function logout() {
 
   DATA.usuarios = [];
   currentUser = null;
+  csrfToken = '';
   closeModal();
   lockApplication();
   setLoginMessage('Sesión cerrada. Ingresá nuevamente para continuar.', 'info');
@@ -1679,17 +1926,17 @@ function openAccountModal() {
   if (!currentUser) return;
   openModal('Sesión activa', `
     <div class="account-summary">
-      <div class="avatar" style="width:48px;height:48px">${getInitials(currentUser.nombre)}</div>
+      <div class="avatar" style="width:48px;height:48px">${escapeHtml(getInitials(currentUser.nombre))}</div>
       <div>
-        <h3 style="font-size:18px;margin-bottom:4px">${currentUser.nombre}</h3>
-        <p style="color:var(--color-text-light);margin-bottom:6px">${currentUser.email}</p>
-        <span class="status-badge status-servicio">${currentUser.rol}</span>
+        <h3 style="font-size:18px;margin-bottom:4px">${escapeHtml(currentUser.nombre)}</h3>
+        <p style="color:var(--color-text-light);margin-bottom:6px">${escapeHtml(currentUser.email)}</p>
+        <span class="status-badge status-servicio">${escapeHtml(currentUser.rol)}</span>
       </div>
     </div>
   `, `
-    <button class="btn btn-secondary" onclick="closeModal()">Cerrar</button>
-    <button class="btn btn-primary" onclick="openChangePasswordModal()"><i class="fa-solid fa-key"></i> Cambiar contraseña</button>
-    <button class="btn btn-danger" onclick="logout()"><i class="fa-solid fa-right-from-bracket"></i> Cerrar sesión</button>
+    <button class="btn btn-secondary" data-action="closeModal">Cerrar</button>
+    <button class="btn btn-primary" data-action="openChangePasswordModal"><i class="fa-solid fa-key"></i> Cambiar contraseña</button>
+    <button class="btn btn-danger" data-action="logout"><i class="fa-solid fa-right-from-bracket"></i> Cerrar sesión</button>
   `);
 }
 
@@ -1702,8 +1949,8 @@ function openChangePasswordModal() {
       <div class="form-group full"><label>Repetir nueva contraseña</label><input type="password" id="cpConfirm" placeholder="Repetir nueva contraseña"></div>
     </div>
   `, `
-    <button class="btn btn-secondary" onclick="openAccountModal()">Volver</button>
-    <button class="btn btn-primary" onclick="changeCurrentPassword()"><i class="fa-solid fa-floppy-disk"></i> Guardar contraseña</button>
+    <button class="btn btn-secondary" data-action="openAccountModal">Volver</button>
+    <button class="btn btn-primary" data-action="changeCurrentPassword"><i class="fa-solid fa-floppy-disk"></i> Guardar contraseña</button>
   `);
 }
 
@@ -1772,12 +2019,15 @@ function requireAdminAccess() {
 async function apiRequest(url, options = {}) {
   const { suppressAuthHandling = false, headers, ...fetchOptions } = options;
   let response;
+  const method = String(fetchOptions.method || 'GET').toUpperCase();
+  const shouldSendCsrf = ['POST', 'PUT', 'PATCH', 'DELETE'].includes(method) && url !== '/api/auth/login' && csrfToken;
 
   try {
     response = await fetch(`${API_ORIGIN}${url}`, {
       credentials: 'same-origin',
       headers: {
         ...(fetchOptions.body ? { 'Content-Type': 'application/json' } : {}),
+        ...(shouldSendCsrf ? { 'X-CSRF-Token': csrfToken } : {}),
         ...(headers || {}),
       },
       ...fetchOptions,
@@ -1907,7 +2157,7 @@ function openVehicleTypeSelector() {
   openModal('Nueva unidad', `
     <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:16px">
       ${Object.entries(VEHICLE_UNIT_TYPES).map(([type, config]) => `
-        <button type="button" class="btn btn-secondary" onclick="openModalNuevaMovilidad('${type}')" style="height:auto;display:flex;flex-direction:column;align-items:flex-start;gap:10px;padding:18px;text-align:left">
+        <button type="button" class="btn btn-secondary" data-action="openModalNuevaMovilidad" data-unit-type="${type}" style="height:auto;display:flex;flex-direction:column;align-items:flex-start;gap:10px;padding:18px;text-align:left">
           <span style="width:42px;height:42px;border-radius:12px;display:inline-flex;align-items:center;justify-content:center;background:rgba(12,118,110,.12);color:var(--color-primary);font-size:18px"><i class="fa-solid ${config.icon}"></i></span>
           <strong style="font-size:16px">${config.label}</strong>
           <span style="font-size:13px;color:var(--color-text-light)">${type === 'camioneta' ? 'Alta estándar para camionetas operativas.' : 'Alta adaptada para cuatriciclos como los CFMOTO 450.'}</span>
@@ -1915,7 +2165,7 @@ function openVehicleTypeSelector() {
       `).join('')}
     </div>
   `, `
-    <button class="btn btn-secondary" onclick="closeModal()">Cancelar</button>
+    <button class="btn btn-secondary" data-action="closeModal">Cancelar</button>
   `);
 }
 
@@ -1945,7 +2195,7 @@ function openModalNuevaMovilidad(unitType = 'camioneta') {
       </div>
       <div class="form-group"><label>Objetivo</label>
         <select id="mObjetivo">
-          ${DATA.objetivos.map(o => `<option value="${o.nombre.toLowerCase()}">${o.nombre}</option>`).join('')}
+          ${DATA.objetivos.map(o => `<option value="${escapeHtml(o.nombre.toLowerCase())}">${escapeHtml(o.nombre)}</option>`).join('')}
         </select>
       </div>
       <div class="form-group"><label>Chofer</label><input type="text" placeholder="Nombre del chofer" id="mChofer"></div>
@@ -1966,8 +2216,8 @@ function openModalNuevaMovilidad(unitType = 'camioneta') {
     <div class="parte-section-title" style="margin-top:18px">Documentación adjunta</div>
     ${renderVehicleFileDocumentsEditor('mDoc', documentacion)}
   `, `
-    <button class="btn btn-secondary" onclick="closeModal()">Cancelar</button>
-    <button class="btn btn-primary" onclick="guardarMovilidad()"><i class="fa-solid fa-floppy-disk"></i> Guardar</button>
+    <button class="btn btn-secondary" data-action="closeModal">Cancelar</button>
+    <button class="btn btn-primary" data-action="guardarMovilidad"><i class="fa-solid fa-floppy-disk"></i> Guardar</button>
   `);
 }
 
@@ -2062,12 +2312,12 @@ function openModalNuevoParte() {
         </div>
         <div class="form-group"><label>Objetivo</label>
           <select id="pObjetivo">
-            ${DATA.objetivos.map(o => `<option>${o.nombre}</option>`).join('')}
+            ${DATA.objetivos.map(o => `<option>${escapeHtml(o.nombre)}</option>`).join('')}
           </select>
         </div>
         <div class="form-group"><label>Unidad (patente)</label>
-          <select id="pUnidad" onchange="syncParteVehicleData('p')">
-            ${DATA.movilidades.map((m, index) => `<option ${index === 0 ? 'selected' : ''}>${m.patente}</option>`).join('')}
+          <select id="pUnidad" data-change-action="syncParteVehicleData" data-prefix="p">
+            ${DATA.movilidades.map((m, index) => `<option ${index === 0 ? 'selected' : ''}>${escapeHtml(m.patente)}</option>`).join('')}
           </select>
         </div>
         <div class="form-group"><label>Patente</label><input type="text" id="pCabPatente" value="${escapeHtml(cabecera.patente)}"></div>
@@ -2102,8 +2352,8 @@ function openModalNuevoParte() {
       </div>
     </div>
   `, `
-    <button class="btn btn-secondary" onclick="closeModal()">Cancelar</button>
-    <button class="btn btn-primary" onclick="guardarParte()"><i class="fa-solid fa-floppy-disk"></i> Guardar</button>
+    <button class="btn btn-secondary" data-action="closeModal">Cancelar</button>
+    <button class="btn btn-primary" data-action="guardarParte"><i class="fa-solid fa-floppy-disk"></i> Guardar</button>
   `);
 }
 
@@ -2156,12 +2406,12 @@ function openModalNovedad() {
       <div class="form-group full"><label>Título</label><input type="text" id="nTitulo" placeholder="Descripción breve"></div>
       <div class="form-group"><label>Unidad</label>
         <select id="nUnidad">
-          ${DATA.movilidades.map(m => `<option>${m.patente}</option>`).join('')}
+          ${DATA.movilidades.map(m => `<option>${escapeHtml(m.patente)}</option>`).join('')}
         </select>
       </div>
       <div class="form-group"><label>Objetivo</label>
         <select id="nObjetivo">
-          ${DATA.objetivos.map(o => `<option>${o.nombre}</option>`).join('')}
+          ${DATA.objetivos.map(o => `<option>${escapeHtml(o.nombre)}</option>`).join('')}
         </select>
       </div>
       <div class="form-group"><label>Tipo</label>
@@ -2182,8 +2432,8 @@ function openModalNovedad() {
       <div class="form-group full"><label>Descripción</label><textarea id="nDescripcion" placeholder="Detalle de la novedad..."></textarea></div>
     </div>
   `, `
-    <button class="btn btn-secondary" onclick="closeModal()">Cancelar</button>
-    <button class="btn btn-primary" onclick="guardarNovedad()"><i class="fa-solid fa-floppy-disk"></i> Guardar</button>
+    <button class="btn btn-secondary" data-action="closeModal">Cancelar</button>
+    <button class="btn btn-primary" data-action="guardarNovedad"><i class="fa-solid fa-floppy-disk"></i> Guardar</button>
   `);
 }
 
@@ -2234,8 +2484,8 @@ function openModalNuevoObjetivo() {
       <div class="form-group full"><label>Descripción</label><input type="text" id="oDesc" placeholder="Descripción breve"></div>
     </div>
   `, `
-    <button class="btn btn-secondary" onclick="closeModal()">Cancelar</button>
-    <button class="btn btn-primary" onclick="guardarObjetivo()"><i class="fa-solid fa-floppy-disk"></i> Guardar</button>
+    <button class="btn btn-secondary" data-action="closeModal">Cancelar</button>
+    <button class="btn btn-primary" data-action="guardarObjetivo"><i class="fa-solid fa-floppy-disk"></i> Guardar</button>
   `);
 }
 
@@ -2279,8 +2529,8 @@ function openModalNuevoUsuario() {
       </div>
     </div>
   `, `
-    <button class="btn btn-secondary" onclick="closeModal()">Cancelar</button>
-    <button class="btn btn-primary" onclick="guardarUsuario()"><i class="fa-solid fa-floppy-disk"></i> Guardar</button>
+    <button class="btn btn-secondary" data-action="closeModal">Cancelar</button>
+    <button class="btn btn-primary" data-action="guardarUsuario"><i class="fa-solid fa-floppy-disk"></i> Guardar</button>
   `);
 }
 
@@ -2313,8 +2563,8 @@ function openModalEditarUsuario(id) {
       <div class="form-group full"><label>Nueva contraseña (opcional)</label><input type="password" id="euPassword" placeholder="Dejar en blanco para conservar la actual"></div>
     </div>
   `, `
-    <button class="btn btn-secondary" onclick="closeModal()">Cancelar</button>
-    <button class="btn btn-primary" onclick="actualizarUsuario(${id})"><i class="fa-solid fa-floppy-disk"></i> Guardar cambios</button>
+    <button class="btn btn-secondary" data-action="closeModal">Cancelar</button>
+    <button class="btn btn-primary" data-action="actualizarUsuario" data-id="${id}"><i class="fa-solid fa-floppy-disk"></i> Guardar cambios</button>
   `);
 }
 
@@ -2406,9 +2656,9 @@ function verDetalleObjetivo(id) {
       <div style="text-align:center"><div style="font-size:28px;font-weight:800;color:var(--color-warning)">${novsObj.length}</div><div style="font-size:11px;color:var(--color-text-light)">Novedades</div></div>
     </div>
     <div class="tabs">
-      <button class="tab-btn active" onclick="switchTab(event,'tabMovs')">Unidades</button>
-      <button class="tab-btn" onclick="switchTab(event,'tabPartes')">Partes</button>
-      <button class="tab-btn" onclick="switchTab(event,'tabNovedades')">Novedades</button>
+      <button class="tab-btn active" data-action="switchTab" data-target-tab="tabMovs">Unidades</button>
+      <button class="tab-btn" data-action="switchTab" data-target-tab="tabPartes">Partes</button>
+      <button class="tab-btn" data-action="switchTab" data-target-tab="tabNovedades">Novedades</button>
     </div>
     <div id="tabMovs" class="tab-content active">
       ${movs.length ? renderTablaMovilidades(movs) : '<div class="empty-state"><i class="fa-solid fa-car-burst"></i><h3>Sin unidades</h3></div>'}
@@ -2430,7 +2680,7 @@ function verHistorialMovilidad(id) {
   openModal(`Historial: ${m.patente}`, `
     <div style="margin-bottom:16px">
       <strong>${escapeHtml(getVehicleDisplayName(m))}</strong> — ${estadoBadge(m.estado)}
-      <div style="font-size:12px;color:var(--color-text-light);margin-top:4px">Chofer: ${m.chofer} | ${provinciaLabel(m.provincia)} | ${m.objetivo}</div>
+      <div style="font-size:12px;color:var(--color-text-light);margin-top:4px">Chofer: ${escapeHtml(m.chofer)} | ${escapeHtml(provinciaLabel(m.provincia))} | ${escapeHtml(m.objetivo)}</div>
       <div style="margin-top:8px" class="vehicle-doc-inline-list">${renderVehicleDocumentStatusStack(m)}</div>
     </div>
     <div class="vehicle-file-panel" style="margin-top:0">
@@ -2451,8 +2701,8 @@ function verHistorialMovilidad(id) {
       ${renderVehicleFileDocumentsReadonly(m)}
     </div>
     <div class="tabs">
-      <button class="tab-btn active" onclick="switchTab(event,'hTabPartes')">Partes (${partes.length})</button>
-      <button class="tab-btn" onclick="switchTab(event,'hTabNovedades')">Novedades (${novs.length})</button>
+      <button class="tab-btn active" data-action="switchTab" data-target-tab="hTabPartes">Partes (${partes.length})</button>
+      <button class="tab-btn" data-action="switchTab" data-target-tab="hTabNovedades">Novedades (${novs.length})</button>
     </div>
     <div id="hTabPartes" class="tab-content active">
       ${partes.length ? renderTablaPartes(partes) : '<div class="empty-state"><i class="fa-solid fa-clipboard"></i><h3>Sin partes</h3></div>'}
@@ -2471,9 +2721,9 @@ function verDetalleParte(id) {
       ${renderPartePaper(p)}
     </div>
   `, `
-    <button class="btn btn-secondary" onclick="exportarPartePDF(${id})"><i class="fa-solid fa-file-pdf"></i> Exportar PDF</button>
-    <button class="btn btn-secondary" onclick="imprimirParte(${id})"><i class="fa-solid fa-print"></i> Imprimir</button>
-    <button class="btn btn-secondary" onclick="closeModal()">Cerrar</button>
+    <button class="btn btn-secondary" data-action="exportarPartePDF" data-id="${id}"><i class="fa-solid fa-file-pdf"></i> Exportar PDF</button>
+    <button class="btn btn-secondary" data-action="imprimirParte" data-id="${id}"><i class="fa-solid fa-print"></i> Imprimir</button>
+    <button class="btn btn-secondary" data-action="closeModal">Cerrar</button>
   `);
 }
 
@@ -2506,22 +2756,22 @@ function editarMovilidad(id) {
         </select>
       </div>
       <div class="form-group"><label>Provincia</label><select id="eProvincia">${renderVehicleProvinceOptions(m.provincia || 'mendoza')}</select></div>
-      <div class="form-group"><label>Chofer</label><input type="text" id="eChofer" value="${m.chofer}"></div>
+      <div class="form-group"><label>Chofer</label><input type="text" id="eChofer" value="${escapeHtml(m.chofer)}"></div>
       <div class="form-group"><label>Km actual</label><input type="number" min="0" step="1" id="eKmActual" value="${escapeHtml(m.kmActual)}"></div>
       <div class="form-group"><label>Km próximo service</label><input type="number" min="0" step="1" id="eKmProximoService" value="${escapeHtml(m.kmProximoService)}"></div>
       <div class="form-group"><label>Vencimiento RTO</label><input type="date" id="eRtoVencimiento" value="${escapeHtml(m.rtoVencimiento)}"></div>
       <div class="form-group"><label>Vencimiento seguro</label><input type="date" id="eSeguroVencimiento" value="${escapeHtml(m.seguroVencimiento)}"></div>
-      <div class="form-group full"><label>Ubicación</label><input type="text" id="eUbicacion" value="${m.ubicacion}"></div>
-      <div class="form-group full"><label>Última novedad</label><input type="text" id="eNovedad" value="${m.ultimaNovedad}"></div>
+      <div class="form-group full"><label>Ubicación</label><input type="text" id="eUbicacion" value="${escapeHtml(m.ubicacion)}"></div>
+      <div class="form-group full"><label>Última novedad</label><input type="text" id="eNovedad" value="${escapeHtml(m.ultimaNovedad)}"></div>
         </div>
         <div class="parte-section-title" style="margin-top:18px">Documentación adjunta</div>
         ${renderVehicleFileDocumentsEditor('eDoc', documentacion)}
       </fieldset>
     </div>
   `, `
-    <button class="btn btn-secondary" onclick="closeModal()">Cancelar</button>
-    <button class="btn btn-danger" id="mobilityEditDeactivateButton" ${lockInfo.locked ? 'disabled' : ''} onclick="darDeBajaMovilidad(${id})"><i class="fa-solid fa-ban"></i> Dar de baja</button>
-    <button class="btn btn-primary" id="mobilityEditSaveButton" ${lockInfo.locked ? 'disabled' : ''} onclick="aplicarEdicionMovilidad(${id})"><i class="fa-solid fa-floppy-disk"></i> Guardar</button>
+    <button class="btn btn-secondary" data-action="closeModal">Cancelar</button>
+    <button class="btn btn-danger" id="mobilityEditDeactivateButton" ${lockInfo.locked ? 'disabled' : ''} data-action="darDeBajaMovilidad" data-id="${id}"><i class="fa-solid fa-ban"></i> Dar de baja</button>
+    <button class="btn btn-primary" id="mobilityEditSaveButton" ${lockInfo.locked ? 'disabled' : ''} data-action="aplicarEdicionMovilidad" data-id="${id}"><i class="fa-solid fa-floppy-disk"></i> Guardar</button>
   `);
   modalOverlay.dataset.mobilityEditId = String(m.id);
   if (lockInfo.locked) {
@@ -2677,12 +2927,12 @@ function editarParte(id) {
       </div>
       <div class="form-group"><label>Objetivo</label>
         <select id="epObjetivo">
-          ${DATA.objetivos.map(o => `<option ${o.nombre === parte.objetivo ? 'selected' : ''}>${o.nombre}</option>`).join('')}
+          ${DATA.objetivos.map(o => `<option ${o.nombre === parte.objetivo ? 'selected' : ''}>${escapeHtml(o.nombre)}</option>`).join('')}
         </select>
       </div>
       <div class="form-group"><label>Unidad</label>
-        <select id="epUnidad" onchange="syncParteVehicleData('ep')">
-          ${DATA.movilidades.map(m => `<option ${m.patente === parte.unidad ? 'selected' : ''}>${m.patente}</option>`).join('')}
+          <select id="epUnidad" data-change-action="syncParteVehicleData" data-prefix="ep">
+          ${DATA.movilidades.map(m => `<option ${m.patente === parte.unidad ? 'selected' : ''}>${escapeHtml(m.patente)}</option>`).join('')}
         </select>
       </div>
       <div class="form-group"><label>Patente</label><input type="text" id="epCabPatente" value="${escapeHtml(cabecera.patente || parte.unidad)}"></div>
@@ -2717,8 +2967,8 @@ function editarParte(id) {
       </div>
     </div>
   `, `
-    <button class="btn btn-secondary" onclick="closeModal()">Cancelar</button>
-    <button class="btn btn-primary" onclick="aplicarEdicionParte(${id})"><i class="fa-solid fa-floppy-disk"></i> Guardar</button>
+    <button class="btn btn-secondary" data-action="closeModal">Cancelar</button>
+    <button class="btn btn-primary" data-action="aplicarEdicionParte" data-id="${id}"><i class="fa-solid fa-floppy-disk"></i> Guardar</button>
   `);
 }
 
@@ -2732,14 +2982,14 @@ function editarNovedad(id) {
       <div class="form-group full"><label>Título</label><input type="text" id="enTitulo" value="${escapeHtml(novedad.titulo)}"></div>
       <div class="form-group"><label>Fecha</label><input type="date" id="enFecha" value="${novedad.fecha}"></div>
       <div class="form-group"><label>Unidad</label>
-        <select id="enUnidad" onchange="syncEditNovedadDriver()">
-          ${DATA.movilidades.map(m => `<option ${m.patente === novedad.unidad ? 'selected' : ''}>${m.patente}</option>`).join('')}
+        <select id="enUnidad" data-change-action="syncEditNovedadDriver">
+          ${DATA.movilidades.map(m => `<option ${m.patente === novedad.unidad ? 'selected' : ''}>${escapeHtml(m.patente)}</option>`).join('')}
         </select>
       </div>
       <div class="form-group"><label>Chofer</label><input type="text" id="enChofer" value="${escapeHtml(novedad.chofer)}"></div>
       <div class="form-group"><label>Objetivo</label>
         <select id="enObjetivo">
-          ${DATA.objetivos.map(o => `<option ${o.nombre === novedad.objetivo ? 'selected' : ''}>${o.nombre}</option>`).join('')}
+          ${DATA.objetivos.map(o => `<option ${o.nombre === novedad.objetivo ? 'selected' : ''}>${escapeHtml(o.nombre)}</option>`).join('')}
         </select>
       </div>
       <div class="form-group"><label>Tipo</label>
@@ -2768,8 +3018,8 @@ function editarNovedad(id) {
       <div class="form-group full"><label>Descripción</label><textarea id="enDescripcion">${escapeHtml(novedad.descripcion)}</textarea></div>
     </div>
   `, `
-    <button class="btn btn-secondary" onclick="closeModal()">Cancelar</button>
-    <button class="btn btn-primary" onclick="aplicarEdicionNovedad(${id})"><i class="fa-solid fa-floppy-disk"></i> Guardar</button>
+    <button class="btn btn-secondary" data-action="closeModal">Cancelar</button>
+    <button class="btn btn-primary" data-action="aplicarEdicionNovedad" data-id="${id}"><i class="fa-solid fa-floppy-disk"></i> Guardar</button>
   `);
 }
 
@@ -2912,18 +3162,22 @@ function resolverNovedad(id) {
 
 function guardarConfiguracion() {
   if (!requirePermission('manageSettings')) return;
+  const themeSelect = document.getElementById('themePreferenceSelect');
+  if (themeSelect) {
+    applyThemePreference(themeSelect.value);
+  }
   showToast('Configuración guardada', 'success');
 }
 
 // ===========================
 // TABS
 // ===========================
-function switchTab(e, targetId) {
-  const container = e.target.closest('.modal-body') || e.target.closest('.page-content');
+function switchTab(triggerEl, targetId) {
+  const container = triggerEl.closest('.modal-body') || triggerEl.closest('.page-content');
   if (!container) return;
   container.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
   container.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
-  e.target.classList.add('active');
+  triggerEl.classList.add('active');
   const target = container.querySelector('#' + targetId);
   if (target) target.classList.add('active');
 }
@@ -2950,9 +3204,9 @@ function bindSearch() {
       searchDropdown.innerHTML = `<div style="padding:14px;text-align:center;color:var(--color-text-light);font-size:13px">Sin resultados</div>`;
     } else {
       searchDropdown.innerHTML = allowedResults.map(r => `
-        <div class="search-result-item" onclick="handleSearchResult('${r.page}','${r.filter || ''}')">
+        <div class="search-result-item" data-action="handleSearchResult" data-page-action="${r.page}" data-filter="${escapeHtml(r.filter || '')}">
           <i class="fa-solid ${r.icon}"></i>
-          <div><div class="result-title">${r.title}</div><div class="result-sub">${r.sub}</div></div>
+          <div><div class="result-title">${escapeHtml(r.title)}</div><div class="result-sub">${escapeHtml(r.sub)}</div></div>
         </div>
       `).join('');
     }
@@ -3025,7 +3279,11 @@ function showToast(msg, type = 'info') {
   const container = document.getElementById('toastContainer');
   const toast = document.createElement('div');
   toast.className = `toast ${type}`;
-  toast.innerHTML = `<i class="fa-solid ${icons[type] || icons.info}"></i><span>${msg}</span>`;
+  const icon = document.createElement('i');
+  icon.className = `fa-solid ${icons[type] || icons.info}`;
+  const text = document.createElement('span');
+  text.textContent = String(msg ?? '');
+  toast.append(icon, text);
   container.appendChild(toast);
   setTimeout(() => toast.remove(), 3500);
 }
@@ -3096,6 +3354,18 @@ function normalizeParteAdjunto(adjunto) {
   };
 }
 
+function isSafeDataUrl(value, kind = 'any') {
+  const dataUrl = String(value || '').trim();
+  if (!dataUrl) return false;
+  if (kind === 'pdf') return /^data:application\/pdf;base64,[a-z0-9+/=]+$/i.test(dataUrl);
+  if (kind === 'image') return /^data:image\/[a-z0-9.+-]+;base64,[a-z0-9+/=]+$/i.test(dataUrl);
+  return /^data:(application\/pdf|image\/[a-z0-9.+-]+);base64,[a-z0-9+/=]+$/i.test(dataUrl);
+}
+
+function getSafeDataUrl(value, kind = 'any') {
+  return isSafeDataUrl(value, kind) ? String(value).trim() : '';
+}
+
 function normalizeVehicleFileDocuments(movilidad = {}) {
   return {
     tarjetaVerde: normalizeParteAdjunto(movilidad.tarjetaVerdeAdjunto),
@@ -3121,16 +3391,20 @@ function renderVehicleFileDocumentsEditor(prefix, documents) {
     <div class="vehicle-file-grid">
       ${items.map(item => `
         <div class="vehicle-file-card">
+          ${(() => {
+            const safePdfDataUrl = getSafeDataUrl(item.file.dataUrl, 'pdf');
+            return `
           <h4>${item.title}</h4>
           <input type="hidden" id="${prefix}${item.key}Nombre" value="${escapeHtml(item.file.name)}">
           <input type="hidden" id="${prefix}${item.key}Tipo" value="${escapeHtml(item.file.type)}">
           <input type="hidden" id="${prefix}${item.key}Data" value="${escapeHtml(item.file.dataUrl)}">
           <label class="btn btn-secondary btn-sm" for="${prefix}${item.key}File"><i class="fa-solid fa-file-pdf"></i> Cargar PDF</label>
-          <input type="file" id="${prefix}${item.key}File" accept="application/pdf,.pdf" style="display:none" onchange="handleVehicleDocumentChange('${prefix}','${item.key}')">
+          <input type="file" id="${prefix}${item.key}File" accept="application/pdf,.pdf" style="display:none" data-change-action="handleVehicleDocumentChange" data-prefix="${prefix}" data-key="${item.key}">
           <div class="vehicle-file-meta" id="${prefix}${item.key}Meta">${item.file.name ? escapeHtml(item.file.name) : 'Sin PDF cargado'}</div>
           <div class="vehicle-file-actions" id="${prefix}${item.key}Actions">
-            ${item.file.dataUrl ? `<a class="btn btn-secondary btn-sm" href="${item.file.dataUrl}" target="_blank" rel="noopener noreferrer" download="${escapeHtml(item.file.name || `${item.title}.pdf`)}"><i class="fa-solid fa-up-right-from-square"></i> Abrir PDF</a><button class="btn btn-secondary btn-sm" type="button" onclick="clearVehicleDocument('${prefix}','${item.key}')"><i class="fa-solid fa-trash"></i> Quitar</button>` : ''}
+            ${safePdfDataUrl ? `<a class="btn btn-secondary btn-sm" href="${safePdfDataUrl}" target="_blank" rel="noopener noreferrer" download="${escapeHtml(item.file.name || `${item.title}.pdf`)}"><i class="fa-solid fa-up-right-from-square"></i> Abrir PDF</a><button class="btn btn-secondary btn-sm" type="button" data-action="clearVehicleDocument" data-prefix="${prefix}" data-key="${item.key}"><i class="fa-solid fa-trash"></i> Quitar</button>` : ''}
           </div>
+        `; })()}
         </div>
       `).join('')}
     </div>
@@ -3150,11 +3424,15 @@ function renderVehicleFileDocumentsReadonly(movilidad) {
     <div class="vehicle-file-grid readonly">
       ${items.map(item => `
         <div class="vehicle-file-card">
+          ${(() => {
+            const safePdfDataUrl = getSafeDataUrl(item.file.dataUrl, 'pdf');
+            return `
           <h4>${item.title}</h4>
           <div class="vehicle-file-meta">${item.file.name ? escapeHtml(item.file.name) : 'Sin archivo cargado'}</div>
           <div class="vehicle-file-actions">
-            ${item.file.dataUrl ? `<a class="btn btn-secondary btn-sm" href="${item.file.dataUrl}" target="_blank" rel="noopener noreferrer" download="${escapeHtml(item.file.name || `${item.title}.pdf`)}"><i class="fa-solid fa-up-right-from-square"></i> Abrir PDF</a>` : '<span class="vehicle-file-empty">No disponible</span>'}
+            ${safePdfDataUrl ? `<a class="btn btn-secondary btn-sm" href="${safePdfDataUrl}" target="_blank" rel="noopener noreferrer" download="${escapeHtml(item.file.name || `${item.title}.pdf`)}"><i class="fa-solid fa-up-right-from-square"></i> Abrir PDF</a>` : '<span class="vehicle-file-empty">No disponible</span>'}
           </div>
+        `; })()}
         </div>
       `).join('')}
     </div>
@@ -3215,7 +3493,29 @@ function handleVehicleDocumentChange(prefix, key) {
     if (dataInput) dataInput.value = dataUrl;
     if (meta) meta.textContent = file.name;
     if (actions) {
-      actions.innerHTML = `<a class="btn btn-secondary btn-sm" href="${dataUrl}" target="_blank" rel="noopener noreferrer" download="${escapeHtml(file.name)}"><i class="fa-solid fa-up-right-from-square"></i> Abrir PDF</a><button class="btn btn-secondary btn-sm" type="button" onclick="clearVehicleDocument('${prefix}','${key}')"><i class="fa-solid fa-trash"></i> Quitar</button>`;
+      actions.replaceChildren();
+
+      const openLink = document.createElement('a');
+      openLink.className = 'btn btn-secondary btn-sm';
+      openLink.href = dataUrl;
+      openLink.target = '_blank';
+      openLink.rel = 'noopener noreferrer';
+      openLink.download = file.name;
+      const openIcon = document.createElement('i');
+      openIcon.className = 'fa-solid fa-up-right-from-square';
+      openLink.append(openIcon, document.createTextNode(' Abrir PDF'));
+
+      const clearButton = document.createElement('button');
+      clearButton.className = 'btn btn-secondary btn-sm';
+      clearButton.type = 'button';
+      clearButton.dataset.action = 'clearVehicleDocument';
+      clearButton.dataset.prefix = prefix;
+      clearButton.dataset.key = key;
+      const clearIcon = document.createElement('i');
+      clearIcon.className = 'fa-solid fa-trash';
+      clearButton.append(clearIcon, document.createTextNode(' Quitar'));
+
+      actions.append(openLink, clearButton);
     }
   };
   reader.readAsDataURL(file);
@@ -3234,7 +3534,7 @@ function clearVehicleDocument(prefix, key) {
   if (typeInput) typeInput.value = '';
   if (dataInput) dataInput.value = '';
   if (meta) meta.textContent = 'Sin PDF cargado';
-  if (actions) actions.innerHTML = '';
+  if (actions) actions.replaceChildren();
 }
 
 function renderParteStatusOptions(selectedValue) {
@@ -3321,30 +3621,32 @@ function renderParteChecklistReadonly(checklist) {
 
 function renderParteAdjuntoEditor(prefix, adjunto) {
   const normalized = normalizeParteAdjunto(adjunto);
+  const safeImageDataUrl = getSafeDataUrl(normalized.dataUrl, 'image');
   return `
     <div class="parte-attachment-editor">
       <input type="hidden" id="${prefix}AdjuntoNombre" value="${escapeHtml(normalized.name)}">
       <input type="hidden" id="${prefix}AdjuntoTipo" value="${escapeHtml(normalized.type)}">
       <input type="hidden" id="${prefix}AdjuntoData" value="${escapeHtml(normalized.dataUrl)}">
       <label class="btn btn-secondary btn-sm" for="${prefix}AdjuntoFile"><i class="fa-solid fa-image"></i> Cargar foto del check</label>
-      <input type="file" id="${prefix}AdjuntoFile" accept="image/*" style="display:none" onchange="handleParteAttachmentChange('${prefix}')">
+      <input type="file" id="${prefix}AdjuntoFile" accept="image/*" style="display:none" data-change-action="handleParteAttachmentChange" data-prefix="${prefix}">
       <div class="parte-attachment-meta" id="${prefix}AdjuntoMeta">${normalized.name ? escapeHtml(normalized.name) : 'Sin imagen cargada'}</div>
-      <div class="parte-attachment-preview ${normalized.dataUrl ? 'has-image' : ''}" id="${prefix}AdjuntoPreview">${normalized.dataUrl ? `<img src="${normalized.dataUrl}" alt="Adjunto del check">` : '<span>Vista previa de la imagen firmada</span>'}</div>
-      ${normalized.dataUrl ? `<button class="btn btn-secondary btn-sm" type="button" onclick="clearParteAttachment('${prefix}')"><i class="fa-solid fa-trash"></i> Quitar imagen</button>` : ''}
+      <div class="parte-attachment-preview ${safeImageDataUrl ? 'has-image' : ''}" id="${prefix}AdjuntoPreview">${safeImageDataUrl ? `<img src="${safeImageDataUrl}" alt="Adjunto del check">` : '<span>Vista previa de la imagen firmada</span>'}</div>
+      ${safeImageDataUrl ? `<button class="btn btn-secondary btn-sm" type="button" data-action="clearParteAttachment" data-prefix="${prefix}"><i class="fa-solid fa-trash"></i> Quitar imagen</button>` : ''}
     </div>
   `;
 }
 
 function renderParteAdjuntoReadonly(adjunto) {
   const normalized = normalizeParteAdjunto(adjunto);
-  if (!normalized.dataUrl) {
+  const safeImageDataUrl = getSafeDataUrl(normalized.dataUrl, 'image');
+  if (!safeImageDataUrl) {
     return '<div class="parte-attachment-empty">No hay imagen adjunta del check firmado.</div>';
   }
 
   return `
     <div class="parte-attachment-readonly">
       <div class="parte-attachment-meta">${escapeHtml(normalized.name || 'Imagen adjunta')}</div>
-      <div class="parte-attachment-preview has-image"><img src="${normalized.dataUrl}" alt="Check firmado adjunto"></div>
+      <div class="parte-attachment-preview has-image"><img src="${safeImageDataUrl}" alt="Check firmado adjunto"></div>
     </div>
   `;
 }
@@ -3387,7 +3689,11 @@ function handleParteAttachmentChange(prefix) {
     if (meta) meta.textContent = file.name;
     if (preview) {
       preview.classList.add('has-image');
-      preview.innerHTML = `<img src="${dataUrl}" alt="Adjunto del check">`;
+      preview.replaceChildren();
+      const image = document.createElement('img');
+      image.src = dataUrl;
+      image.alt = 'Adjunto del check';
+      preview.appendChild(image);
     }
 
     showToast('Imagen adjunta cargada.', 'success');
@@ -3410,7 +3716,10 @@ function clearParteAttachment(prefix) {
   if (meta) meta.textContent = 'Sin imagen cargada';
   if (preview) {
     preview.classList.remove('has-image');
-    preview.innerHTML = '<span>Vista previa de la imagen firmada</span>';
+    preview.replaceChildren();
+    const placeholder = document.createElement('span');
+    placeholder.textContent = 'Vista previa de la imagen firmada';
+    preview.appendChild(placeholder);
   }
 }
 
@@ -3503,10 +3812,10 @@ function renderPartePaper(parte) {
         <div><span>Supervisor</span><strong>${escapeHtml(cabecera.firmaSupervisor || 'Sin dato')}</strong></div>
       </div>
 
-      ${adjunto.dataUrl ? `
+      ${getSafeDataUrl(adjunto.dataUrl, 'image') ? `
         <div class="parte-paper-block">
           <h3>Check firmado adjunto</h3>
-          <div class="parte-paper-image-wrap"><img src="${adjunto.dataUrl}" alt="Imagen adjunta del check firmado"></div>
+          <div class="parte-paper-image-wrap"><img src="${getSafeDataUrl(adjunto.dataUrl, 'image')}" alt="Imagen adjunta del check firmado"></div>
         </div>
       ` : ''}
     </div>
@@ -3799,7 +4108,7 @@ function getInitials(name) {
 }
 
 function renderVehicleBrandOptions(selectedValue = '') {
-  return ['<option value="">Seleccionar marca</option>', ...VEHICLE_BRANDS.map(brand => `<option value="${brand}" ${brand === selectedValue ? 'selected' : ''}>${brand}</option>`)].join('');
+  return ['<option value="">Seleccionar marca</option>', ...VEHICLE_BRANDS.map(brand => `<option value="${escapeHtml(brand)}" ${brand === selectedValue ? 'selected' : ''}>${escapeHtml(brand)}</option>`)].join('');
 }
 
 function normalizeVehicleUnitType(value = '') {
@@ -3817,15 +4126,15 @@ function getVehicleUnitTypeLabel(value = '') {
 
 function renderVehicleUnitTypeOptions(selectedValue = 'camioneta') {
   const normalized = normalizeVehicleUnitType(selectedValue);
-  return Object.entries(VEHICLE_UNIT_TYPES).map(([value, config]) => `<option value="${value}" ${value === normalized ? 'selected' : ''}>${config.label}</option>`).join('');
+  return Object.entries(VEHICLE_UNIT_TYPES).map(([value, config]) => `<option value="${escapeHtml(value)}" ${value === normalized ? 'selected' : ''}>${escapeHtml(config.label)}</option>`).join('');
 }
 
 function renderVehicleOwnershipOptions(selectedValue = 'propia') {
-  return VEHICLE_OWNERSHIP_OPTIONS.map(option => `<option value="${option}" ${option === selectedValue ? 'selected' : ''}>${capitalize(option)}</option>`).join('');
+  return VEHICLE_OWNERSHIP_OPTIONS.map(option => `<option value="${escapeHtml(option)}" ${option === selectedValue ? 'selected' : ''}>${escapeHtml(capitalize(option))}</option>`).join('');
 }
 
 function renderVehicleProvinceOptions(selectedValue = '') {
-  return VEHICLE_PROVINCES.map(province => `<option value="${province}" ${province === selectedValue ? 'selected' : ''}>${provinciaLabel(province)}</option>`).join('');
+  return VEHICLE_PROVINCES.map(province => `<option value="${escapeHtml(province)}" ${province === selectedValue ? 'selected' : ''}>${escapeHtml(provinciaLabel(province))}</option>`).join('');
 }
 
 function validateVehicleTechnicalFields({ anio = '', numeroMotor = '', numeroChasis = '' }) {
@@ -3959,7 +4268,8 @@ function escapeHtml(value) {
     .replace(/&/g, '&amp;')
     .replace(/"/g, '&quot;')
     .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;');
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
 }
 
 function estadoBadge(estado) {
