@@ -31,7 +31,18 @@ let uiPreferences = loadUiPreferences();
 let systemThemeMediaQuery = null;
 const REALTIME_TRACKED_PAGES = ['inicio', 'movilidades', 'objetivos', 'partes', 'novedades', 'reportes'];
 const REALTIME_HEARTBEAT_MS = 3000;
+const LOGIN_SUCCESS_TRANSITION_MS = 620;
+const LOGIN_WELCOME_MS = 1300;
+const INACTIVITY_TIMEOUT_MINUTES_OPTIONS = [10, 20, 30];
+const DEFAULT_INACTIVITY_TIMEOUT_MINUTES = 20;
+const INACTIVITY_WARNING_MS = 60 * 1000;
+const INACTIVITY_ACTIVITY_EVENTS = ['mousemove', 'mousedown', 'keydown', 'touchstart', 'scroll'];
 let realtimeHeartbeatId = null;
+let inactivityWarningTimeoutId = null;
+let inactivityCountdownIntervalId = null;
+let inactivityDeadlineAt = 0;
+let inactivityWarningOpen = false;
+let inactivityTrackingBound = false;
 let realtimeState = {
   samePageUsers: [],
   lastSeenVersion: 0,
@@ -207,6 +218,7 @@ const loginPassword = document.getElementById('loginPassword');
 const loginMessage = document.getElementById('loginMessage');
 const passwordToggle = document.getElementById('passwordToggle');
 const rememberSession = document.getElementById('rememberSession');
+const loginSubmitButton = document.querySelector('.auth-submit');
 const sidebarAvatar = document.getElementById('sidebarAvatar');
 const sidebarUserName = document.getElementById('sidebarUserName');
 const sidebarUserRole = document.getElementById('sidebarUserRole');
@@ -228,6 +240,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   bindModal();
   bindAuth();
   bindDynamicActions();
+  bindInactivityTracking();
   await restoreSession();
 
   if (currentUser) {
@@ -1160,6 +1173,7 @@ function reporteExportar() {
 // ===========================
 function renderConfiguracion() {
   const canManage = can('manageSettings');
+  const inactivityMinutes = normalizeInactivityTimeoutMinutes(uiPreferences.inactivityMinutes);
   pageContent.innerHTML = `
     <div class="page-header">
       <div class="page-title">
@@ -1185,7 +1199,17 @@ function renderConfiguracion() {
       <h3><i class="fa-solid fa-shield"></i> Seguridad</h3>
       <div class="config-grid">
         ${configItem('Doble autenticación', 'Requerir 2FA al iniciar sesión', false)}
-        ${configItem('Bloqueo automático', 'Cerrar sesión tras 30 min. inactivo', true)}
+        <div class="config-item config-item-theme">
+          <div class="config-item-info">
+            <h4>Bloqueo automático</h4>
+            <p>Tiempo máximo sin actividad antes de cerrar la sesión.</p>
+          </div>
+          <div class="config-item-actions">
+            <select id="inactivityTimeoutSelect" class="config-select" ${canManage ? '' : 'disabled'}>
+              ${INACTIVITY_TIMEOUT_MINUTES_OPTIONS.map(minutes => `<option value="${minutes}" ${inactivityMinutes === minutes ? 'selected' : ''}>${minutes} minutos</option>`).join('')}
+            </select>
+          </div>
+        </div>
         ${configItem('Log de actividad', 'Registrar todas las acciones de usuarios', true)}
       </div>
     </div>
@@ -1325,7 +1349,11 @@ function openModal(title, bodyHTML, footerHTML) {
   modalOverlay.classList.add('show');
 }
 
-function closeModal() {
+function closeModal(options = {}) {
+  const force = options.force === true;
+  if (inactivityWarningOpen && !force) {
+    return;
+  }
   modalOverlay.classList.remove('show');
   delete modalOverlay.dataset.mobilityEditId;
   clearRealtimeEditContext();
@@ -1376,6 +1404,7 @@ function handleDynamicClick(event) {
     editarUsuario: el => editarUsuario(Number(el.dataset.id)),
     eliminarUsuario: el => eliminarUsuario(Number(el.dataset.id)),
     refreshCurrentPageData: () => refreshCurrentPageData(),
+    keepSessionAlive: () => keepSessionAlive(),
     closeModal: () => closeModal(),
     openChangePasswordModal: () => openChangePasswordModal(),
     logout: () => logout(),
@@ -1464,11 +1493,16 @@ function persistRememberSessionPreference() {
 function loadUiPreferences() {
   try {
     const rawValue = window.localStorage.getItem(UI_PREFERENCES_KEY);
-    if (!rawValue) return { theme: 'system' };
+    if (!rawValue) {
+      return { theme: 'system', inactivityMinutes: DEFAULT_INACTIVITY_TIMEOUT_MINUTES };
+    }
     const parsed = JSON.parse(rawValue);
-    return { theme: normalizeThemePreference(parsed?.theme) };
+    return {
+      theme: normalizeThemePreference(parsed?.theme),
+      inactivityMinutes: normalizeInactivityTimeoutMinutes(parsed?.inactivityMinutes),
+    };
   } catch (_error) {
-    return { theme: 'system' };
+    return { theme: 'system', inactivityMinutes: DEFAULT_INACTIVITY_TIMEOUT_MINUTES };
   }
 }
 
@@ -1478,6 +1512,17 @@ function saveUiPreferences() {
 
 function normalizeThemePreference(value) {
   return THEME_PREFERENCES.includes(value) ? value : 'system';
+}
+
+function normalizeInactivityTimeoutMinutes(value) {
+  const numericValue = Number(value);
+  return INACTIVITY_TIMEOUT_MINUTES_OPTIONS.includes(numericValue)
+    ? numericValue
+    : DEFAULT_INACTIVITY_TIMEOUT_MINUTES;
+}
+
+function getInactivityTimeoutMs() {
+  return normalizeInactivityTimeoutMinutes(uiPreferences.inactivityMinutes) * 60 * 1000;
 }
 
 function getResolvedTheme(themePreference = uiPreferences.theme) {
@@ -1603,6 +1648,124 @@ function queueRealtimeHeartbeat() {
     return;
   }
   heartbeatRealtime().catch(() => {});
+}
+
+function bindInactivityTracking() {
+  if (inactivityTrackingBound) return;
+  INACTIVITY_ACTIVITY_EVENTS.forEach(eventName => {
+    document.addEventListener(eventName, handleInactivityActivity, true);
+  });
+  document.addEventListener('visibilitychange', () => {
+    if (!document.hidden) {
+      handleInactivityActivity();
+    }
+  });
+  inactivityTrackingBound = true;
+}
+
+function handleInactivityActivity() {
+  if (!currentUser || inactivityWarningOpen) return;
+  resetInactivityTimers();
+}
+
+function startInactivityTracking() {
+  if (!currentUser) return;
+  resetInactivityTimers();
+}
+
+function stopInactivityTracking() {
+  if (inactivityWarningTimeoutId) {
+    window.clearTimeout(inactivityWarningTimeoutId);
+    inactivityWarningTimeoutId = null;
+  }
+  if (inactivityCountdownIntervalId) {
+    window.clearInterval(inactivityCountdownIntervalId);
+    inactivityCountdownIntervalId = null;
+  }
+  inactivityDeadlineAt = 0;
+  closeInactivityWarning({ force: true });
+}
+
+function resetInactivityTimers() {
+  if (!currentUser) return;
+  if (inactivityWarningOpen) {
+    closeInactivityWarning({ force: true });
+  }
+  if (inactivityWarningTimeoutId) {
+    window.clearTimeout(inactivityWarningTimeoutId);
+  }
+  const warningDelay = Math.max(1000, getInactivityTimeoutMs() - INACTIVITY_WARNING_MS);
+  inactivityWarningTimeoutId = window.setTimeout(() => {
+    openInactivityWarning();
+  }, warningDelay);
+}
+
+function openInactivityWarning() {
+  if (!currentUser) return;
+  inactivityWarningOpen = true;
+  inactivityDeadlineAt = Date.now() + INACTIVITY_WARNING_MS;
+
+  openModal('Sesion por inactividad', `
+    <div class="inactivity-warning-body">
+      <p>Tu sesion se cerrara por seguridad si no hay actividad.</p>
+      <p>Tiempo restante: <strong id="inactiveCountdown">01:00</strong></p>
+    </div>
+  `, `
+    <button class="btn btn-secondary" data-action="keepSessionAlive"><i class="fa-solid fa-clock-rotate-left"></i> Seguir conectado</button>
+    <button class="btn btn-danger" data-action="logout"><i class="fa-solid fa-right-from-bracket"></i> Cerrar sesión</button>
+  `);
+
+  updateInactivityCountdown();
+  if (inactivityCountdownIntervalId) {
+    window.clearInterval(inactivityCountdownIntervalId);
+  }
+  inactivityCountdownIntervalId = window.setInterval(() => {
+    const remainingMs = updateInactivityCountdown();
+    if (remainingMs <= 0) {
+      forceLogoutByInactivity();
+    }
+  }, 250);
+}
+
+function updateInactivityCountdown() {
+  const countdownEl = document.getElementById('inactiveCountdown');
+  const remainingMs = Math.max(0, inactivityDeadlineAt - Date.now());
+  if (countdownEl) {
+    countdownEl.textContent = formatMsAsClock(remainingMs);
+  }
+  return remainingMs;
+}
+
+function formatMsAsClock(ms) {
+  const totalSeconds = Math.ceil(ms / 1000);
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return `${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`;
+}
+
+function closeInactivityWarning({ force = false } = {}) {
+  if (!inactivityWarningOpen) return;
+  if (!force) return;
+
+  inactivityWarningOpen = false;
+  inactivityDeadlineAt = 0;
+  if (inactivityCountdownIntervalId) {
+    window.clearInterval(inactivityCountdownIntervalId);
+    inactivityCountdownIntervalId = null;
+  }
+  closeModal({ force: true });
+}
+
+function keepSessionAlive() {
+  if (!currentUser) return;
+  closeInactivityWarning({ force: true });
+  resetInactivityTimers();
+  showToast(`Sesion extendida por ${normalizeInactivityTimeoutMinutes(uiPreferences.inactivityMinutes)} minutos.`, 'success');
+}
+
+function forceLogoutByInactivity() {
+  closeInactivityWarning({ force: true });
+  logout({ reason: 'inactivity' });
 }
 
 async function heartbeatRealtime() {
@@ -1848,6 +2011,7 @@ async function handleLogin(e) {
   }
 
   try {
+    setLoginSubmittingState(true);
     const data = await apiRequest('/api/auth/login', {
       method: 'POST',
       body: JSON.stringify({ email, password, rememberSession: shouldRememberSession }),
@@ -1865,12 +2029,16 @@ async function handleLogin(e) {
 
     loginForm.reset();
     setLoginMessage('Acceso concedido.', 'success');
+    await playLoginSuccessTransition();
     unlockApplication();
     renderPage('inicio');
     startRealtimeHeartbeat();
+    showLoginWelcome(currentUser.nombre);
     showToast(`Sesión iniciada: ${currentUser.nombre}`, 'success');
   } catch (error) {
     setLoginMessage(error.message || 'No se pudo iniciar sesión.', 'error');
+  } finally {
+    setLoginSubmittingState(false);
   }
 }
 
@@ -1891,6 +2059,9 @@ async function restoreSession() {
 }
 
 function lockApplication() {
+  stopInactivityTracking();
+  document.body.classList.remove('auth-entering');
+  authOverlay?.classList.remove('is-exiting');
   document.body.classList.add('auth-locked');
   authOverlay?.classList.add('show');
   pageContent.innerHTML = '';
@@ -1900,6 +2071,9 @@ function lockApplication() {
 }
 
 function unlockApplication() {
+  startInactivityTracking();
+  document.body.classList.remove('auth-entering');
+  authOverlay?.classList.remove('is-exiting');
   document.body.classList.remove('auth-locked');
   authOverlay?.classList.remove('show');
   document.title = APP_TITLE;
@@ -1907,7 +2081,68 @@ function unlockApplication() {
   syncCurrentUserUI();
 }
 
-async function logout() {
+function setLoginSubmittingState(isSubmitting) {
+  if (!loginSubmitButton) return;
+  loginSubmitButton.disabled = isSubmitting;
+  loginSubmitButton.classList.toggle('is-loading', isSubmitting);
+  loginSubmitButton.setAttribute('aria-busy', isSubmitting ? 'true' : 'false');
+}
+
+function playLoginSuccessTransition() {
+  if (!document.body || !authOverlay) {
+    return Promise.resolve();
+  }
+
+  const reduceMotion = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const transitionDuration = reduceMotion ? 0 : LOGIN_SUCCESS_TRANSITION_MS;
+
+  document.body.classList.add('auth-entering');
+  authOverlay.classList.add('is-exiting');
+
+  return new Promise(resolve => {
+    window.setTimeout(() => {
+      resolve();
+    }, transitionDuration);
+  });
+}
+
+function showLoginWelcome(userName = '') {
+  const safeName = String(userName || '').trim() || 'equipo';
+  const greeting = getTimeBasedWelcomeGreeting();
+  const existing = document.getElementById('loginWelcomeOverlay');
+  if (existing) existing.remove();
+
+  const overlay = document.createElement('div');
+  overlay.className = 'login-welcome-overlay';
+  overlay.id = 'loginWelcomeOverlay';
+  overlay.innerHTML = `
+    <div class="login-welcome-card" role="status" aria-live="polite">
+      <div class="login-welcome-kicker">HUARPE LOGISTICA</div>
+      <div class="login-welcome-title">${greeting}</div>
+      <div class="login-welcome-name">${escapeHtml(safeName)}</div>
+    </div>
+  `;
+
+  document.body.appendChild(overlay);
+
+  const reduceMotion = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const lifetime = reduceMotion ? 700 : LOGIN_WELCOME_MS;
+
+  window.setTimeout(() => {
+    overlay.classList.add('hide');
+    window.setTimeout(() => overlay.remove(), reduceMotion ? 180 : 420);
+  }, lifetime);
+}
+
+function getTimeBasedWelcomeGreeting(date = new Date()) {
+  const hour = Number(date.getHours());
+  if (hour >= 6 && hour < 12) return 'Buen dia';
+  if (hour >= 12 && hour < 20) return 'Buenas tardes';
+  return 'Buenas noches';
+}
+
+async function logout(options = {}) {
+  const reason = options.reason || 'manual';
   try {
     await apiRequest('/api/auth/logout', { method: 'POST', suppressAuthHandling: true });
   } catch (_error) {
@@ -1916,8 +2151,13 @@ async function logout() {
   DATA.usuarios = [];
   currentUser = null;
   csrfToken = '';
-  closeModal();
+  closeModal({ force: true });
   lockApplication();
+  if (reason === 'inactivity') {
+    setLoginMessage('Sesion cerrada por inactividad. Ingresá nuevamente para continuar.', 'warning');
+    showToast('Sesion cerrada por inactividad', 'warning');
+    return;
+  }
   setLoginMessage('Sesión cerrada. Ingresá nuevamente para continuar.', 'info');
   showToast('Sesión cerrada', 'info');
 }
@@ -3163,10 +3403,22 @@ function resolverNovedad(id) {
 function guardarConfiguracion() {
   if (!requirePermission('manageSettings')) return;
   const themeSelect = document.getElementById('themePreferenceSelect');
+  const inactivityTimeoutSelect = document.getElementById('inactivityTimeoutSelect');
+
   if (themeSelect) {
-    applyThemePreference(themeSelect.value);
+    uiPreferences.theme = normalizeThemePreference(themeSelect.value);
+    applyThemePreference(uiPreferences.theme, { persist: false });
   }
-  showToast('Configuración guardada', 'success');
+
+  if (inactivityTimeoutSelect) {
+    uiPreferences.inactivityMinutes = normalizeInactivityTimeoutMinutes(inactivityTimeoutSelect.value);
+    if (currentUser) {
+      resetInactivityTimers();
+    }
+  }
+
+  saveUiPreferences();
+  showToast(`Configuración guardada. Inactividad: ${normalizeInactivityTimeoutMinutes(uiPreferences.inactivityMinutes)} min.`, 'success');
 }
 
 // ===========================

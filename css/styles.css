@@ -117,10 +117,29 @@ body.auth-locked .modal-overlay {
   pointer-events: none;
 }
 
+body.auth-locked.auth-entering .sidebar,
+body.auth-locked.auth-entering .main-wrapper {
+  opacity: 1;
+  visibility: visible;
+  transform: translateY(0) scale(1);
+  pointer-events: none;
+}
+
 body:not(.auth-locked) .sidebar,
 body:not(.auth-locked) .main-wrapper {
   opacity: 1;
   visibility: visible;
+}
+
+.sidebar,
+.main-wrapper {
+  transition: opacity .42s ease, transform .42s ease, margin-left .22s cubic-bezier(.4,0,.2,1);
+  transform: translateY(0) scale(1);
+}
+
+body.auth-locked .sidebar,
+body.auth-locked .main-wrapper {
+  transform: translateY(14px) scale(.985);
 }
 
 a { text-decoration: none; color: inherit; }
@@ -370,6 +389,9 @@ input, select, textarea { font: inherit; }
   animation: authBackdropIn .7s ease-out;
 }
 .auth-overlay.show { display: flex; }
+.auth-overlay.is-exiting {
+  animation: authBackdropOut .58s cubic-bezier(.22,.61,.36,1) forwards;
+}
 .auth-shell {
   width: min(400px, 100%);
   display: block;
@@ -387,6 +409,9 @@ input, select, textarea { font: inherit; }
   box-shadow: 0 34px 90px rgba(0,0,0,.5), 0 0 0 1px rgba(255,255,255,.08) inset;
   backdrop-filter: blur(10px);
   animation: authCardIn .55s cubic-bezier(.2,.8,.2,1);
+}
+body.auth-entering .auth-card {
+  animation: authCardOut .5s cubic-bezier(.22,.61,.36,1) forwards;
 }
 .auth-brand {
   display: flex;
@@ -502,6 +527,26 @@ input, select, textarea { font: inherit; }
 .auth-submit:active {
   transform: translateY(0);
 }
+.auth-submit.is-loading {
+  position: relative;
+  color: rgba(255,255,255,.82);
+  pointer-events: none;
+}
+.auth-submit.is-loading i {
+  opacity: 0;
+}
+.auth-submit.is-loading::after {
+  content: '';
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  border: 2px solid rgba(255,255,255,.34);
+  border-top-color: #ffffff;
+  position: absolute;
+  right: 14px;
+  top: calc(50% - 8px);
+  animation: authSpin .7s linear infinite;
+}
 .password-field {
   position: relative;
   width: 100%;
@@ -546,9 +591,82 @@ input, select, textarea { font: inherit; }
   gap: 14px;
 }
 
+.inactivity-warning-body {
+  display: grid;
+  gap: 10px;
+  line-height: 1.45;
+  color: var(--color-text-light);
+}
+
+.inactivity-warning-body strong {
+  font-variant-numeric: tabular-nums;
+  color: var(--color-warning);
+  letter-spacing: .06em;
+}
+
+.login-welcome-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 1300;
+  pointer-events: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: linear-gradient(120deg, rgba(6, 78, 59, .32), rgba(21, 128, 61, .2));
+  animation: welcomeOverlayIn .32s ease-out forwards;
+}
+
+.login-welcome-overlay.hide {
+  animation: welcomeOverlayOut .36s ease-in forwards;
+}
+
+.login-welcome-card {
+  min-width: min(420px, 88vw);
+  max-width: 88vw;
+  border-radius: 20px;
+  border: 1px solid rgba(255,255,255,.34);
+  padding: 24px 28px;
+  background: rgba(7, 18, 12, .82);
+  box-shadow: 0 28px 60px rgba(0,0,0,.34);
+  color: #ecfdf5;
+  text-align: center;
+  backdrop-filter: blur(8px);
+  animation: welcomeCardIn .44s cubic-bezier(.2,.8,.2,1) forwards;
+}
+
+.login-welcome-kicker {
+  display: inline-block;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: .18em;
+  text-transform: uppercase;
+  color: #86efac;
+  margin-bottom: 10px;
+}
+
+.login-welcome-title {
+  font-size: 30px;
+  font-weight: 800;
+  line-height: 1;
+  letter-spacing: -.02em;
+  margin-bottom: 8px;
+}
+
+.login-welcome-name {
+  font-size: 18px;
+  color: #bbf7d0;
+  font-weight: 600;
+  letter-spacing: .02em;
+}
+
 @keyframes authBackdropIn {
   from { opacity: 0; }
   to { opacity: 1; }
+}
+
+@keyframes authBackdropOut {
+  from { opacity: 1; }
+  to { opacity: 0; }
 }
 
 @keyframes authCardIn {
@@ -559,6 +677,19 @@ input, select, textarea { font: inherit; }
   to {
     opacity: 1;
     transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes authCardOut {
+  from {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+    filter: blur(0);
+  }
+  to {
+    opacity: 0;
+    transform: translateY(-18px) scale(.96);
+    filter: blur(2px);
   }
 }
 
@@ -578,11 +709,44 @@ input, select, textarea { font: inherit; }
   50% { transform: translateY(-4px); }
 }
 
+@keyframes authSpin {
+  to { transform: rotate(360deg); }
+}
+
+@keyframes welcomeOverlayIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes welcomeOverlayOut {
+  from { opacity: 1; }
+  to { opacity: 0; }
+}
+
+@keyframes welcomeCardIn {
+  from {
+    opacity: 0;
+    transform: translateY(14px) scale(.97);
+    filter: blur(1px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+    filter: blur(0);
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .auth-overlay,
   .auth-card,
-  .auth-logo {
+  .auth-logo,
+  .sidebar,
+  .main-wrapper,
+  .auth-submit.is-loading::after,
+  .login-welcome-overlay,
+  .login-welcome-card {
     animation: none !important;
+    transition: none !important;
   }
 }
 
